@@ -1,0 +1,38 @@
+following Brew install:
+https://github.com/lukasc-ubc/klayout/tree/master/macbuild#6c-fully-homebrew-flavored-build-with-homebrew-ruby-32-and-homebrew-python-39
+
+
+brew install ruby
+brew install python@3.9
+brew install qt@5
+
+
+
+gdsfactory:
+
+brew install cmake
+
+pip3.9 install gdsfactory
+- didn't work: https://github.com/gdsfactory/gdsfactory/issues/1426
+
+worked manually:
+- forked gdsfactory
+- github desktop
+- cd to gdsfactory folder
+- python3.9
+	- import gdsfactory
+
+failed due to missing packages:
+  /opt/homebrew/opt/python@3.9/bin/pip3.9 install flatdict, toolz, gdstk, pydantic, omegaconf, orjson, loguru, rich, shapely, jinja2
+
+then it works.
+
+in KLayout, also works!
+
+ran example 00
+
+
+
+
+
+
