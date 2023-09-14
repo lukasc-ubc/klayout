@@ -1,3 +1,5 @@
+Early 2023:
+
 following Brew install:
 https://github.com/lukasc-ubc/klayout/tree/master/macbuild#6c-fully-homebrew-flavored-build-with-homebrew-ruby-32-and-homebrew-python-39
 
@@ -6,7 +8,8 @@ brew install ruby
 brew install python@3.9
 brew install qt@5
 
-
+LW version, worked for 0.28.5
+./build4mac.py -q qt5brew -r hb32 -p hb39; ./build4mac.py -q qt5brew -r hb32 -p hb39 -Y
 
 gdsfactory:
 
@@ -32,6 +35,14 @@ in KLayout, also works!
 ran example 00
 
 
+2023/09
+
+LW version 0.28.12 crashed when built using LW.
+
+Trying HW:
+
+./build4mac.py -q qt5brew -r sys -p hb39; ./build4mac.py -q qt5brew -r sys -p hb39 -y; 
+error: !!! Binary directory <qt5Brew.bin.macos-Monterey-release-RsysPhb39> is not present !!!
 
 
 
