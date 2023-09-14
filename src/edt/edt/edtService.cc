@@ -471,6 +471,9 @@ Service::selection_bbox ()
   //  build the transformation variants cache 
   //  TODO: this is done multiple times - once for each service!
   TransformationVariants tv (view ());
+  const db::DCplxTrans &vp = view ()->viewport ().trans ();
+
+  lay::TextInfo text_info (view ());
 
   db::DBox box;
   for (objects::const_iterator r = m_selection.begin (); r != m_selection.end (); ++r) {
@@ -486,7 +489,13 @@ Service::selection_bbox ()
       const std::vector<db::DCplxTrans> *tv_list = tv.per_cv_and_layer (r->cv_index (), r->layer ());
       if (tv_list != 0) {
         for (std::vector<db::DCplxTrans>::const_iterator t = tv_list->begin (); t != tv_list->end (); ++t) {
-          box += *t * (ctx_trans * r->shape ().bbox ());
+          if (r->shape ().is_text ()) {
+            db::Text text;
+            r->shape ().text (text);
+            box += *t * text_info.bbox (ctx_trans * text, vp * *t);
+          } else {
+            box += *t * (ctx_trans * r->shape ().bbox ());
+          }
         }
       }
 
@@ -1100,7 +1109,20 @@ Service::transient_select (const db::DPoint &pos)
 
       lay::ShapeMarker *marker = new lay::ShapeMarker (view (), r->cv_index ());
       marker->set (r->shape (), gt, mp_view->cv_transform_variants (r->cv_index (), r->layer ()));
-      marker->set_vertex_size (0);
+
+      bool is_point = false;
+      if (r->shape ().is_edge () || r->shape ().is_box ()) {
+        is_point = r->shape ().bbox ().is_point ();
+      } else if (r->shape ().is_point ()) {
+        is_point = true;
+      }
+
+      if (is_point) {
+        marker->set_vertex_shape (lay::ViewOp::Cross);
+        marker->set_vertex_size (9 /*cross vertex size*/);
+      } else {
+        marker->set_vertex_size (0);
+      }
       marker->set_line_width (1);
       marker->set_halo (0);
 
@@ -1594,7 +1616,15 @@ Service::do_selection_to_view ()
         } 
 
         marker->set (r->shape (), gt, *tv_list);
-        if (r->shape ().is_text ()) {
+
+        bool is_point = false;
+        if (r->shape ().is_text () || r->shape ().is_point ()) {
+          is_point = true;
+        } else if (r->shape ().is_edge () || r->shape ().is_box ()) {
+          is_point = r->shape ().bbox ().is_point ();
+        }
+
+        if (is_point) {
           //  show the origins as crosses for texts
           marker->set_vertex_shape (lay::ViewOp::Cross);
           marker->set_vertex_size (9 /*cross vertex size*/);

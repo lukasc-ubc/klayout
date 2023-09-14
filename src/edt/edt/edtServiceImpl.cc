@@ -266,9 +266,13 @@ ShapeEditService::deliver_shape (const db::Polygon &poly)
 {
   if (m_combine_mode == CM_Add) {
 
-    manager ()->transaction (tl::to_string (tr ("Create polygon")));
+    if (manager ()) {
+      manager ()->transaction (tl::to_string (tr ("Create polygon")));
+    }
     cell ().shapes (layer ()).insert (poly);
-    manager ()->commit ();
+    if (manager ()) {
+      manager ()->commit ();
+    }
 
   } else {
 
@@ -326,7 +330,9 @@ ShapeEditService::deliver_shape (const db::Polygon &poly)
       result = input;
     }
 
-    manager ()->transaction (tl::to_string (tr ("Combine shape with background")));
+    if (manager ()) {
+      manager ()->transaction (tl::to_string (tr ("Combine shape with background")));
+    }
 
     //  Erase existing shapes
     for (std::vector<db::Shape>::const_iterator s = shapes.begin (); s != shapes.end (); ++s) {
@@ -341,7 +347,9 @@ ShapeEditService::deliver_shape (const db::Polygon &poly)
       cell ().shapes (layer ()).insert (*p);
     }
 
-    manager ()->commit ();
+    if (manager ()) {
+      manager ()->commit ();
+    }
 
   }
 }
@@ -350,9 +358,13 @@ void
 ShapeEditService::deliver_shape (const db::Path &path)
 {
   if (m_combine_mode == CM_Add) {
-    manager ()->transaction (tl::to_string (tr ("Create path")));
+    if (manager ()) {
+      manager ()->transaction (tl::to_string (tr ("Create path")));
+    }
     cell ().shapes (layer ()).insert (path);
-    manager ()->commit ();
+    if (manager ()) {
+      manager ()->commit ();
+    }
   } else {
     deliver_shape (path.polygon ());
   }
@@ -362,11 +374,29 @@ void
 ShapeEditService::deliver_shape (const db::Box &box)
 {
   if (m_combine_mode == CM_Add) {
-    manager ()->transaction (tl::to_string (tr ("Create box")));
+    if (manager ()) {
+      manager ()->transaction (tl::to_string (tr ("Create box")));
+    }
     cell ().shapes (layer ()).insert (box);
-    manager ()->commit ();
+    if (manager ()) {
+      manager ()->commit ();
+    }
   } else {
     deliver_shape (db::Polygon (box));
+  }
+}
+
+void
+ShapeEditService::deliver_shape (const db::Point &point)
+{
+  if (m_combine_mode == CM_Add) {
+    if (manager ()) {
+      manager ()->transaction (tl::to_string (tr ("Create point")));
+    }
+    cell ().shapes (layer ()).insert (point);
+    if (manager ()) {
+      manager ()->commit ();
+    }
   }
 }
 
@@ -801,6 +831,103 @@ BoxService::selection_applies (const lay::ObjectInstPath &sel) const
 }
 
 // -----------------------------------------------------------------------------
+//  PointService implementation
+
+PointService::PointService (db::Manager *manager, lay::LayoutViewBase *view)
+  : ShapeEditService (manager, view, db::ShapeIterator::Points)
+{
+  //  .. nothing yet ..
+}
+
+#if defined(HAVE_QT)
+std::vector<lay::PropertiesPage *>
+PointService::properties_pages (db::Manager *manager, QWidget *parent)
+{
+  std::vector<lay::PropertiesPage *> pages;
+  pages.push_back (new edt::PointPropertiesPage (this, manager, parent));
+  return pages;
+}
+#endif
+
+void
+PointService::do_begin_edit (const db::DPoint &p)
+{
+  get_edit_layer ();
+
+  db::DPoint pp = snap2 (p);
+  m_p = pp;
+
+  set_edit_marker (new lay::Marker (view (), cv_index ()));
+  update_marker ();
+}
+
+db::Point
+PointService::get_point () const
+{
+  return db::Point (trans () * m_p);
+}
+
+void
+PointService::update_marker ()
+{
+  lay::Marker *marker = dynamic_cast<lay::Marker *> (edit_marker ());
+  if (marker) {
+
+    db::Point pt = get_point ();
+    marker->set (db::Box (pt, pt), db::VCplxTrans (1.0 / layout ().dbu ()) * trans ().inverted ());
+
+    view ()->message (std::string ("x: ") +
+                      tl::micron_to_string (m_p.x ()) +
+                      std::string ("  y: ") +
+                      tl::micron_to_string (m_p.y ()));
+
+  }
+}
+
+void
+PointService::do_mouse_move_inactive (const db::DPoint &p)
+{
+  lay::PointSnapToObjectResult snap_details = snap2_details (p);
+  mouse_cursor_from_snap_details (snap_details);
+}
+
+void
+PointService::do_mouse_move (const db::DPoint &p)
+{
+  do_mouse_move_inactive (p);
+
+  set_cursor (lay::Cursor::cross);
+  m_p = snap2 (p);
+  update_marker ();
+}
+
+bool
+PointService::do_mouse_click (const db::DPoint &p)
+{
+  do_mouse_move (p);
+  return true;
+}
+
+void
+PointService::do_finish_edit ()
+{
+  deliver_shape (get_point ());
+  commit_recent (view ());
+}
+
+void
+PointService::do_cancel_edit ()
+{
+  //  .. nothing yet ..
+}
+
+bool
+PointService::selection_applies (const lay::ObjectInstPath &sel) const
+{
+  return !sel.is_cell_inst () && sel.shape ().is_point ();
+}
+
+// -----------------------------------------------------------------------------
 //  TextService implementation
 
 TextService::TextService (db::Manager *manager, lay::LayoutViewBase *view)
@@ -912,9 +1039,13 @@ TextService::do_finish_edit ()
 {
   get_edit_layer ();
 
-  manager ()->transaction (tl::to_string (tr ("Create text")));
+  if (manager ()) {
+    manager ()->transaction (tl::to_string (tr ("Create text")));
+  }
   cell ().shapes (layer ()).insert (get_text ());
-  manager ()->commit ();
+  if (manager ()) {
+    manager ()->commit ();
+  }
 
   commit_recent (view ());
 
@@ -1634,11 +1765,15 @@ InstService::do_finish_edit ()
         throw tl::Exception (tl::to_string (tr ("Inserting this instance would create a recursive hierarchy")));
       }
 
-      manager ()->transaction (tl::to_string (tr ("Create instance")), m_reference_transaction_id);
+      if (manager ()) {
+        manager ()->transaction (tl::to_string (tr ("Create instance")), m_reference_transaction_id);
+      }
       m_reference_transaction_id = 0;
       db::Instance i = cv->layout ().cell (cv.cell_index ()).insert (inst);
       cv->layout ().cleanup ();
-      manager ()->commit ();
+      if (manager ()) {
+        manager ()->commit ();
+      }
 
       commit_recent (view ());
 

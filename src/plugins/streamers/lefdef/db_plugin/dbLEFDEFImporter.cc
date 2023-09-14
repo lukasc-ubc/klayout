@@ -37,14 +37,29 @@ namespace db
 // -----------------------------------------------------------------------------------
 //  Path resolution utility
 
-std::string correct_path (const std::string &fn, const db::Layout &layout, const std::string &base_path)
+std::string correct_path (const std::string &fn_in, const db::Layout &layout, const std::string &base_path)
 {
+  const db::Technology *tech = layout.technology ();
+
+  //  Allow LEF reference through expressions, i.e.
+  //    $(base_path) - path of the main file
+  //    $(tech_dir)  - the location of the .lyt file if a technology is specified
+  //    $(tech_name) - the name of the technology if one is specified
+  //  In addition expressions are interpolated, e.g. "$(env('HOME'))".
+
+  tl::Eval expr;
+  expr.set_var ("base_path", base_path);
+  if (tech) {
+    expr.set_var ("tech_dir", tech->base_path ());
+    expr.set_var ("tech_name", tech->name ());
+  }
+
+  std::string fn = expr.interpolate (fn_in);
+
   if (! tl::is_absolute (fn)) {
 
     //  if a technology is given and the file can be found in the technology's base path, take it
     //  from there.
-    const db::Technology *tech = layout.technology ();
-
     if (tech && ! tech->base_path ().empty ()) {
       std::string new_fn = tl::combine_path (tech->base_path (), fn);
       if (tl::file_exists (new_fn)) {
@@ -515,6 +530,7 @@ LEFDEFReaderOptions::LEFDEFReaderOptions ()
     m_special_routing_suffix (""),
     m_special_routing_datatype (0),
     m_separate_groups (false),
+    m_joined_paths (false),
     m_map_file (),
     m_macro_resolution_mode (0),
     m_read_lef_with_def (true),
@@ -592,6 +608,7 @@ LEFDEFReaderOptions &LEFDEFReaderOptions::operator= (const LEFDEFReaderOptions &
     m_special_routing_datatype = d.m_special_routing_datatype;
     m_special_routing_datatypes = d.m_special_routing_datatypes;
     m_separate_groups = d.m_separate_groups;
+    m_joined_paths = d.m_joined_paths;
     m_map_file = d.m_map_file;
     m_macro_resolution_mode = d.m_macro_resolution_mode;
     m_lef_files = d.m_lef_files;
@@ -876,16 +893,18 @@ LEFDEFReaderOptions::special_routing_datatype_str () const
 LEFDEFReaderState::LEFDEFReaderState (const LEFDEFReaderOptions *tc, db::Layout &layout, const std::string &base_path)
   : mp_importer (0), m_create_layers (true), m_has_explicit_layer_mapping (false), m_laynum (1), mp_tech_comp (tc)
 {
-  if (! tc->map_file ().empty ()) {
+  if (! tc) {
+
+    //  use default options
+
+  } else if (! tc->map_file ().empty ()) {
 
     read_map_file (tc->map_file (), layout, base_path);
 
   } else {
 
-    if (tc) {
-      m_layer_map = tc->layer_map ();
-      m_create_layers = tc->read_all_layers ();
-    }
+    m_layer_map = tc->layer_map ();
+    m_create_layers = tc->read_all_layers ();
 
   }
 }
@@ -990,7 +1009,6 @@ LEFDEFReaderState::read_map_file (const std::string &filename, db::Layout &layou
 
   //  build an explicit layer mapping now.
 
-  tl_assert (m_has_explicit_layer_mapping);
   m_layers.clear ();
   m_layer_map.clear ();
 
@@ -1013,9 +1031,12 @@ LEFDEFReaderState::read_single_map_file (const std::string &path, std::map<std::
 
   tl::log << tl::to_string (tr ("Reading LEF/DEF map file")) << " " << file_stream.absolute_path ();
 
+  //  Purpose name to purpose code
   std::map<std::string, LayerPurpose> purpose_translation;
   purpose_translation ["LEFPIN"] = LEFPins;
   purpose_translation ["PIN"] = Pins;
+  purpose_translation ["LEFPINNAME"] = LEFLabel;
+  purpose_translation ["PINNAME"] = Label;
   purpose_translation ["FILL"] = Fills;
   purpose_translation ["FILLOPC"] = FillsOPC;
   purpose_translation ["LEFOBS"] = Obstructions;
@@ -1024,6 +1045,11 @@ LEFDEFReaderState::read_single_map_file (const std::string &path, std::map<std::
   purpose_translation ["VIA"] = ViaGeometry;
   purpose_translation ["BLOCKAGE"] = Blockage;
   purpose_translation ["ALL"] = All;
+
+  //  List of purposes corresponding to ALL
+  LayerPurpose all_purposes[] = {
+    LEFPins, Pins, Fills, FillsOPC, Obstructions, SpecialRouting, Routing, ViaGeometry
+  };
 
   while (! ts.at_end ()) {
 
@@ -1212,10 +1238,8 @@ LEFDEFReaderState::read_single_map_file (const std::string &path, std::map<std::
 
           } else if (i->second == All) {
 
-            for (std::map<std::string, LayerPurpose>::const_iterator p = purpose_translation.begin (); p != purpose_translation.end (); ++p) {
-              if (p->second != All && p->second != Blockage) {
-                translated_purposes.insert (LayerDetailsKey (p->second, mask, via_size));
-              }
+            for (LayerPurpose *p = all_purposes; p != all_purposes + sizeof (all_purposes) / sizeof (all_purposes[0]); ++p) {
+              translated_purposes.insert (LayerDetailsKey (*p, mask, via_size));
             }
 
           } else {

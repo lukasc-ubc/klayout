@@ -27,6 +27,7 @@
 
 #include "ui_MarkerBrowserPage.h"
 #include "rdbMarkerBrowser.h"
+#include "layMargin.h"
 #include "tlDeferredExecution.h"
 #include "tlColor.h"
 #include "dbBox.h"
@@ -104,6 +105,21 @@ public:
   void show_all (bool f);
 
   /**
+   *  @brief Gets a value indicating whether to list the shapes in the info panel
+   */
+  bool list_shapes () const
+  {
+    return m_list_shapes;
+  }
+
+  /**
+   *  @brief Sets a value indicating whether to list the shapes in the info panel
+   *
+   *  If this property is set to false, shapes will not be listed in the info panel.
+   */
+  void list_shapes (bool f);
+
+  /**
    *  @brief Update the contents 
    *
    *  This method must be called when the database has been updated.
@@ -122,7 +138,7 @@ public:
   /**
    *  @brief Set the window type and window dimensions
    */
-  void set_window (rdb::window_type window_type, double window_dim, rdb::context_mode_type context);
+  void set_window (rdb::window_type window_type, const lay::Margin &window_dim, rdb::context_mode_type context);
 
   /**
    *  @brief Set the maximum number of markers shown in the marker selection list
@@ -176,6 +192,7 @@ public slots:
   void waive ();
   void unwaive ();
   void show_all_clicked ();
+  void list_shapes_clicked ();
   void info_anchor_clicked (const QUrl &link);
   void filter_changed ();
 
@@ -184,6 +201,7 @@ private:
   bool m_update_needed;
   rdb::Database *mp_database;
   bool m_show_all;
+  bool m_list_shapes;
   QAction *m_show_all_action;
   lay::LayoutViewBase *mp_view;
   unsigned int m_cv_index;
@@ -195,7 +213,7 @@ private:
   bool m_in_directory_selection_change;
   rdb::context_mode_type m_context;
   rdb::window_type m_window;
-  double m_window_dim;
+  lay::Margin m_window_dim;
   size_t m_max_marker_count;
   tl::Color m_marker_color;
   int m_marker_line_width;

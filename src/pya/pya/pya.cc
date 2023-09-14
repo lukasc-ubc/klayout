@@ -34,6 +34,7 @@
 #include "gsiDecl.h"
 #include "gsiDeclBasic.h"
 #include "tlLog.h"
+#include "tlEnv.h"
 #include "tlStream.h"
 #include "tlTimer.h"
 #include "tlFileUtils.h"
@@ -108,13 +109,13 @@ public:
   {
     while (frame != NULL) {
 
-#if PY_VERSION_HEX >= 0x030B0000
+#if PY_VERSION_HEX >= 0x030A0000
       int line = PyFrame_GetLineNumber(frame);
 #else
       int line = frame->f_lineno;
 #endif
       std::string fn;
-#if PY_VERSION_HEX >= 0x030B0000
+#if PY_VERSION_HEX >= 0x030A0000
       if (test_type<std::string> (PyFrame_GetCode(frame)->co_filename, true)) {
         fn = normalize_path (python2c<std::string> (PyFrame_GetCode(frame)->co_filename));
 #else
@@ -124,7 +125,7 @@ public:
       }
       m_stack_trace.push_back (tl::BacktraceElement (fn, line));
 
-#if PY_VERSION_HEX >= 0x030B0000
+#if PY_VERSION_HEX >= 0x030A0000
       frame = PyFrame_GetBack(frame);
 #else
       frame = frame->f_back;
@@ -140,6 +141,16 @@ public:
 
   virtual size_t scope_index () const
   {
+    static int consider_scope = -1;
+
+    //  disable scoped debugging (e.g. DRC script lines) if $KLAYOUT_PYA_DEBUG_SCOPE is set.
+    if (consider_scope < 0) {
+      consider_scope = tl::app_flag ("pya-debug-scope") ? 0 : 1;
+    }
+    if (! consider_scope) {
+      return 0;
+    }
+
     if (! m_scope.empty ()) {
       for (size_t i = 0; i < m_stack_trace.size (); ++i) {
         if (m_stack_trace [i].file == m_scope) {
@@ -888,10 +899,12 @@ gsi::Console *PythonInterpreter::current_console () const
 
 void PythonInterpreter::begin_execution ()
 {
-  m_file_id_map.clear ();
   m_block_exceptions = false;
-  if (m_current_exec_level++ == 0 && mp_current_exec_handler) {
-    mp_current_exec_handler->start_exec (this);
+  if (m_current_exec_level++ == 0) {
+    m_file_id_map.clear ();
+    if (mp_current_exec_handler) {
+      mp_current_exec_handler->start_exec (this);
+    }
   }
 }
 

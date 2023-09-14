@@ -500,7 +500,7 @@ TEST(11_ErrorOnCircuitRedefinition)
     msg = ex.msg ();
   }
 
-  EXPECT_EQ (tl::replaced (msg, path, "?"), "Redefinition of circuit SUBCKT in ?, line 20");
+  EXPECT_EQ (tl::replaced (msg, tl::absolute_file_path (path), "?"), "Redefinition of circuit SUBCKT in ?, line 20");
 }
 
 TEST(12_IgnoreDuplicateGlobals)
@@ -580,7 +580,7 @@ TEST(14_IncludeWithError)
     reader.read (is, nl);
     EXPECT_EQ (true, false);  //  must not happen
   } catch (tl::Exception &ex) {
-    EXPECT_EQ (ex.msg (), "'M' element must have four nodes in " + std::string (tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader14x.cir")) + ", line 3");
+    EXPECT_EQ (ex.msg (), "'M' element must have four nodes in " + std::string (tl::absolute_file_path (tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader14x.cir"))) + ", line 3");
   }
 }
 
@@ -704,16 +704,134 @@ TEST(18_XSchemOutput)
     "  subcircuit 'PMOS4_STANDARD(L=0.15U,NF=2,W=1.5U)' XDUMMY3 (D=VDD,G=VDD,S=VDD,B=VDD);\n"
     "end;\n"
     "circuit 'PMOS4_STANDARD(L=0.15U,NF=4,W=1.5U)' (D=D,G=G,S=S,B=B);\n"
-    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=2.685,PD=1.79);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=1.305,AD=0.87,PS=10.74,PD=7.16);\n"
     "end;\n"
     "circuit 'NMOS4_STANDARD(L=0.15U,NF=4,W=1.5U)' (D=D,G=G,S=S,B=B);\n"
-    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=2.685,PD=1.79);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=1.305,AD=0.87,PS=10.74,PD=7.16);\n"
     "end;\n"
     "circuit 'NMOS4_STANDARD(L=0.15U,NF=2,W=1.5U)' (D=D,G=G,S=S,B=B);\n"
-    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=3.58,PD=1.79);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.87,AD=0.435,PS=7.16,PD=3.58);\n"
     "end;\n"
     "circuit 'PMOS4_STANDARD(L=0.15U,NF=2,W=1.5U)' (D=D,G=G,S=S,B=B);\n"
-    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=3.58,PD=1.79);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.87,AD=0.435,PS=7.16,PD=3.58);\n"
+    "end;\n"
+  );
+}
+
+TEST(19_ngspice_ref)
+{
+  db::Netlist nl;
+
+  std::string path = tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader19.cir");
+
+  db::NetlistSpiceReader reader;
+  tl::InputStream is (path);
+  reader.read (is, nl);
+
+  EXPECT_EQ (nl.to_string (),
+    "circuit .TOP ();\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=4,W=1.5)' XPMOS (D=Q,G=I,S=VDD,B=VDD);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=4,W=1.5)' XNMOS (D=Q,G=I,S=VSS,B=VSS);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=2,W=1.5)' XDUMMY0 (D=VSS,G=VSS,S=VSS,B=VSS);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=2,W=1.5)' XDUMMY1 (D=VSS,G=VSS,S=VSS,B=VSS);\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=2,W=1.5)' XDUMMY2 (D=VDD,G=VDD,S=VDD,B=VDD);\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=2,W=1.5)' XDUMMY3 (D=VDD,G=VDD,S=VDD,B=VDD);\n"
+    "end;\n"
+    "circuit 'PMOS4_STANDARD(L=0.15,NF=4,W=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=3.99,PD=2.66);\n"
+    "end;\n"
+    "circuit 'NMOS4_STANDARD(L=0.15,NF=4,W=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=3.99,PD=2.66);\n"
+    "end;\n"
+    "circuit 'NMOS4_STANDARD(L=0.15,NF=2,W=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=4.16,PD=2.08);\n"
+    "end;\n"
+    "circuit 'PMOS4_STANDARD(L=0.15,NF=2,W=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=4.16,PD=2.08);\n"
+    "end;\n"
+  );
+}
+
+//  using parameters evaluated before inside formulas
+TEST(19b_ngspice_ref)
+{
+  db::Netlist nl;
+
+  std::string path = tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader19b.cir");
+
+  db::NetlistSpiceReader reader;
+  tl::InputStream is (path);
+  reader.read (is, nl);
+
+  EXPECT_EQ (nl.to_string (),
+    "circuit .TOP ();\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=4,V=1.5)' XPMOS (D=Q,G=I,S=VDD,B=VDD);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=4,V=1.5)' XNMOS (D=Q,G=I,S=VSS,B=VSS);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=2,V=1.5)' XDUMMY0 (D=VSS,G=VSS,S=VSS,B=VSS);\n"
+    "  subcircuit 'NMOS4_STANDARD(L=0.15,NF=2,V=1.5)' XDUMMY1 (D=VSS,G=VSS,S=VSS,B=VSS);\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=2,V=1.5)' XDUMMY2 (D=VDD,G=VDD,S=VDD,B=VDD);\n"
+    "  subcircuit 'PMOS4_STANDARD(L=0.15,NF=2,V=1.5)' XDUMMY3 (D=VDD,G=VDD,S=VDD,B=VDD);\n"
+    "end;\n"
+    "circuit 'PMOS4_STANDARD(L=0.15,NF=4,V=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=3.99,PD=2.66);\n"
+    "end;\n"
+    "circuit 'NMOS4_STANDARD(L=0.15,NF=4,V=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=6,AS=0.32625,AD=0.2175,PS=3.99,PD=2.66);\n"
+    "end;\n"
+    "circuit 'NMOS4_STANDARD(L=0.15,NF=2,V=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__NFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=4.16,PD=2.08);\n"
+    "end;\n"
+    "circuit 'PMOS4_STANDARD(L=0.15,NF=2,V=1.5)' (D=D,G=G,S=S,B=B);\n"
+    "  device SKY130_FD_PR__PFET_01V8 M1 (S=S,G=G,D=D,B=B) (L=0.15,W=3,AS=0.435,AD=0.2175,PS=4.16,PD=2.08);\n"
+    "end;\n"
+  );
+}
+
+//  issue #1319, clarification
+TEST(20_precendence)
+{
+  db::Netlist nl;
+
+  std::string path = tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader20.cir");
+
+  db::NetlistSpiceReader reader;
+  tl::InputStream is (path);
+  reader.read (is, nl);
+
+  EXPECT_EQ (nl.to_string (),
+    "circuit TEST ();\n"
+    "  device CAP '1' (A=A,B=B) (C=5e-12,A=0,P=0);\n"
+    "  device CAP '2A' (A=A,B=B) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP '2B' (A=A,B=B) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL1 '3' (A=A,B=B) (C=5e-12,A=0,P=0);\n"
+    "  device CAP3 '4' (A=A,B=B,W=CAP_MODEL1) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL2 '5' (A=A,B=B,W=C) (C=5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL1 '6' (A=A,B=B) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL2 '7A' (A=A,B=B,W=C) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL2 '7B' (A=A,B=B,W=C) (C=2.5e-12,A=0,P=0);\n"
+    "  device CAP_MODEL2 '8' (A=A,B=B,W=C) (C=2.5e-12,A=0,P=0);\n"
+    "end;\n"
+  );
+}
+
+//  issue #1320, .lib support
+TEST(21_lib)
+{
+  db::Netlist nl;
+
+  std::string path = tl::combine_path (tl::combine_path (tl::testdata (), "algo"), "nreader21.cir");
+
+  db::NetlistSpiceReader reader;
+  tl::InputStream is (path);
+  reader.read (is, nl);
+
+  EXPECT_EQ (nl.to_string (),
+    "circuit .TOP ();\n"
+    "  device CAP '10' (A='1',B='2') (C=1e-12,A=0,P=0);\n"
+    "  device CAP '1' (A='1',B='2') (C=1e-10,A=0,P=0);\n"
+    "  device CAP '2A' (A='1',B='2') (C=1.01e-10,A=0,P=0);\n"
+    "  device CAP '2B' (A='1',B='2') (C=1.02e-10,A=0,P=0);\n"
+    "  device CAP '100' (A='1',B='2') (C=1.5e-11,A=0,P=0);\n"
     "end;\n"
   );
 }
@@ -827,4 +945,19 @@ TEST(100_ExpressionParser)
   v = tl::Variant ();
   EXPECT_EQ (parser.try_read ("\"1+2*(2+1)-1\"", v), true);
   EXPECT_EQ (v.to_string (), "6");
+}
+
+TEST(101_ExpressionParserWithDefScale)
+{
+  std::map<std::string, tl::Variant> vars;
+  vars["A"] = 17.5;
+
+  tl::Variant v;
+
+  db::NetlistSpiceReaderExpressionParser parser (&vars, 1e-3);
+
+  EXPECT_EQ (parser.read ("1.75").to_string (), "0.00175");
+  EXPECT_EQ (parser.read ("-1.75u").to_string (), "-1.75e-06");
+  EXPECT_EQ (parser.read ("1.75k").to_string (), "1750");
+  EXPECT_EQ (parser.read ("2*A").to_string (), "0.035");
 }

@@ -24,6 +24,8 @@
 #include "dbGDS2Reader.h"
 #include "dbGDS2Writer.h"
 #include "dbLayoutDiff.h"
+#include "dbLibraryManager.h"
+#include "dbLibrary.h"
 #include "dbShapeProcessor.h"
 #include "dbWriter.h"
 #include "dbTextWriter.h"
@@ -1191,6 +1193,123 @@ TEST(121)
   db::GDS2WriterOptions opt;
   opt.max_vertex_count = 4;
   run_test (_this, "t121.oas.gz", "t121_au.gds.gz", true, opt);
+}
+
+//  Meta info
+TEST(130a)
+{
+  db::Layout layout_org;
+
+  db::Library *lib = db::LibraryManager::instance ().lib_ptr_by_name ("Basic");
+  std::pair<bool, db::pcell_id_type> pc = lib->layout ().pcell_by_name ("TEXT");
+
+  layout_org.add_cell ("U");
+  db::cell_index_type ci = layout_org.add_cell ("X");
+
+  std::map<std::string, tl::Variant> params;
+  params.insert (std::make_pair ("text", "ABC"));
+  params.insert (std::make_pair ("layer", db::LayerProperties (1, 0)));
+  db::cell_index_type lib_cell = lib->layout ().get_pcell_variant_dict (pc.second, params);
+  db::cell_index_type cil = layout_org.get_lib_proxy (lib, lib_cell);
+
+  //  the proxy needs an instance otherwise it is cleaned away before writing
+  layout_org.cell (ci).insert (db::CellInstArray (cil, db::Trans ()));
+
+  layout_org.add_meta_info ("a", db::MetaInfo ("description", 17.5, true));
+  layout_org.add_meta_info ("b", db::MetaInfo ("", "value", true));
+
+  layout_org.add_meta_info (ci, "a", db::MetaInfo ("dd", true, true));
+  layout_org.add_meta_info (ci, "c", db::MetaInfo ("d", -1, true));
+
+  layout_org.add_meta_info (cil, "x", db::MetaInfo ("", 42, true));
+  layout_org.add_meta_info (cil, "y", db::MetaInfo ("", -17, true));
+
+  //  complex type
+  tl::Variant v2;
+  v2.set_array ();
+  v2.insert ("x", "value_for_x");
+  v2.insert ("y", db::DBox (1.5, 2.5, 3.5, 4.5));
+  tl::Variant v1;
+  v1.set_list (0);
+  v1.push (-1.5);
+  v1.push (v2);
+  layout_org.add_meta_info (ci, "complex", db::MetaInfo ("", v1, true));
+  layout_org.add_meta_info ("complex", db::MetaInfo ("", v1, true));
+
+  std::string tmp_file = tl::TestBase::tmp_file ("tmp_GDS2Writer_130a.gds");
+
+  {
+    tl::OutputStream out (tmp_file);
+    db::SaveLayoutOptions options;
+    db::Writer writer (options);
+    writer.write (layout_org, out);
+  }
+
+  db::Layout layout_read;
+
+  {
+    tl::InputStream in (tmp_file);
+    db::Reader reader (in);
+    reader.read (layout_read);
+  }
+
+  EXPECT_EQ (layout_read.has_meta_info ("x"), false);
+  EXPECT_EQ (layout_read.has_meta_info ("a"), true);
+  EXPECT_EQ (layout_read.meta_info ("x").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info ("a").value.to_string (), "17.5");
+  EXPECT_EQ (layout_read.meta_info ("a").description, "description");
+  EXPECT_EQ (layout_read.has_meta_info ("b"), true);
+  EXPECT_EQ (layout_read.meta_info ("b").value.to_string (), "value");
+  EXPECT_EQ (layout_read.meta_info ("b").description, "");
+  EXPECT_EQ (layout_read.has_meta_info ("complex"), true);
+  EXPECT_EQ (layout_read.meta_info ("complex").value.is_list (), true);
+  EXPECT_EQ (layout_read.meta_info ("complex").value.size (), size_t (2));
+  EXPECT_EQ (layout_read.meta_info ("complex").value.begin () [1].is_array (), true);
+  EXPECT_EQ (layout_read.meta_info ("complex").value.to_string (), "-1.5,x=>value_for_x,y=>(1.5,2.5;3.5,4.5)");
+
+  db::cell_index_type ci2 = layout_read.cell_by_name ("X").second;
+  db::cell_index_type cil2 = layout_read.cell_by_name ("TEXT").second;
+
+  EXPECT_EQ (layout_read.meta_info (ci2, "x").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info (ci2, "a").value.to_string (), "true");
+  EXPECT_EQ (layout_read.meta_info (ci2, "a").description, "dd");
+  EXPECT_EQ (layout_read.meta_info (ci2, "c").value.to_string (), "-1");
+  EXPECT_EQ (layout_read.meta_info (ci2, "c").description, "d");
+  EXPECT_EQ (layout_read.meta_info (ci2, "complex").value.is_list (), true);
+  EXPECT_EQ (layout_read.meta_info (ci2, "complex").value.size (), size_t (2));
+  EXPECT_EQ (layout_read.meta_info (ci2, "complex").value.begin () [1].is_array (), true);
+  EXPECT_EQ (layout_read.meta_info (ci2, "complex").value.to_string (), "-1.5,x=>value_for_x,y=>(1.5,2.5;3.5,4.5)");
+
+  EXPECT_EQ (layout_read.meta_info (cil2, "x").value.to_string (), "42");
+  EXPECT_EQ (layout_read.meta_info (cil2, "y").value.to_string (), "-17");
+
+  tmp_file = tl::TestBase::tmp_file ("tmp_GDS2Writer_130b.gds");
+
+  {
+    tl::OutputStream out (tmp_file);
+    db::SaveLayoutOptions options;
+    options.set_write_context_info (false);
+    db::Writer writer (options);
+    writer.write (layout_org, out);
+  }
+
+  layout_read = db::Layout ();
+
+  {
+    tl::InputStream in (tmp_file);
+    db::Reader reader (in);
+    reader.read (layout_read);
+  }
+
+  EXPECT_EQ (layout_read.meta_info ("x").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info ("a").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info ("b").value.to_string (), "nil");
+
+  ci2 = layout_read.cell_by_name ("X").second;
+
+  EXPECT_EQ (layout_read.meta_info (ci2, "x").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info ("a").value.to_string (), "nil");
+  EXPECT_EQ (layout_read.meta_info ("b").value.to_string (), "nil");
 }
 
 //  Extreme fracturing by max. points

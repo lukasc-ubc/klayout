@@ -36,6 +36,7 @@ SOURCES += \
   gsiDeclLayRdbAdded.cc \
   layAbstractMenu.cc \
   layLayoutViewConfig.cc \
+  layMargin.cc \
   laybasicForceLink.cc \
   layAnnotationShapes.cc \
   layBitmap.cc \
@@ -52,6 +53,7 @@ SOURCES += \
   layEditable.cc \
   layEditorServiceBase.cc \
   layFinder.cc \
+  layTextInfo.cc \
   layFixedFont.cc \
   layLayoutCanvas.cc \
   layLineStylePalette.cc \
@@ -85,6 +87,7 @@ SOURCES += \
   layUtils.cc \
 
 HEADERS += \
+  layMargin.h \
   laybasicConfig.h \
   laybasicForceLink.h \
   layAbstractMenu.h \
@@ -104,6 +107,7 @@ HEADERS += \
   layEditorServiceBase.h \
   layLayoutCanvas.h \
   layFinder.h \
+  layTextInfo.h \
   layFixedFont.h \
   layLayoutViewBase.h \
   layLineStylePalette.h \

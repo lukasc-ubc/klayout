@@ -124,9 +124,9 @@ static void ui_exception_handler_tl (const tl::Exception &ex, QWidget *parent)
 
     if (gsi_excpt->line () > 0) {
       tl::error << gsi_excpt->sourcefile () << ":" << gsi_excpt->line () << ": " 
-                << gsi_excpt->msg () << tl::to_string (QObject::tr (" (class ")) << gsi_excpt->cls () << ")";
+                << gsi_excpt->msg ();
     } else {
-      tl::error << gsi_excpt->msg () << tl::to_string (QObject::tr (" (class ")) << gsi_excpt->cls () << ")";
+      tl::error << gsi_excpt->msg ();
     }
 
     lay::RuntimeErrorForm error_dialog (parent, "ruby_error_form", gsi_excpt);
@@ -686,28 +686,59 @@ ApplicationBase::init_app ()
       tc->add_path (*p);
     }
 
+    tc->load ();
+
+    bool needs_reload = false;
+
+    //  disambiguator for tech name
+    std::map<std::string, int> tech_disambiguator;
+    std::map<std::string, std::string> tech_name_for_file;
+
+    for (auto t = db::Technologies::instance ()->begin (); t != db::Technologies::instance ()->end (); ++t) {
+      tech_disambiguator.insert (std::make_pair (t->name (), 0));
+    }
+
     //  import technologies from the command line
     for (std::vector <std::pair<file_type, std::pair<std::string, std::string> > >::iterator f = m_files.begin (); f != m_files.end (); ++f) {
 
       if (f->first == layout_file_with_tech_file) {
+
+        const std::string &tech_file = f->second.second;
 
         if (tl::verbosity () >= 20) {
           tl::info << "Importing technology from " << f->second.second;
         }
 
         db::Technology t;
-        t.load (f->second.second);
+        t.load (tech_file);
+
+        //  disambiguate the name, so we do not overwrite technologies with the same name from the config
+        if (tech_name_for_file.find (tech_file) != tech_name_for_file.end ()) {
+          t.set_name (tech_name_for_file [tech_file]);
+        } else if (tech_disambiguator.find (t.name ()) != tech_disambiguator.end ()) {
+          int &index = tech_disambiguator [t.name ()];
+          index += 1;
+          t.set_name (t.name () + tl::sprintf ("[%d]", index));
+          tech_name_for_file.insert (std::make_pair (tech_file, t.name ()));
+        } else {
+          tech_disambiguator.insert (std::make_pair (t.name (), 0));
+          tech_name_for_file.insert (std::make_pair (tech_file, t.name ()));
+        }
 
         tc->add_temp_tech (t);
 
         f->first = layout_file_with_tech;
         f->second.second = t.name ();
 
+        needs_reload = true;
+
       }
 
     }
 
-    tc->load ();
+    if (needs_reload) {
+      tc->load ();
+    }
 
   }
 
@@ -1480,6 +1511,18 @@ GuiApplication::initialize ()
 bool
 GuiApplication::notify (QObject *receiver, QEvent *e)
 {
+  QWheelEvent *wheel_event = dynamic_cast<QWheelEvent *>(e);
+  if (wheel_event) {
+    //  intercept wheel events targeting QComboBox objects to avoid
+    //  changing them through wheel actions.
+    for (auto r = receiver; r != 0; r = r->parent ()) {
+      if (dynamic_cast<QComboBox *>(r)) {
+        //  stop further processing
+        return true;
+      }
+    }
+  }
+
   if (dynamic_cast<QPaintEvent *> (e)) {
     //  NOTE: we don't want recursive paint events - the painters are not reentrant.
     //  Hence we disable process_events_impl (specifically for progress reporters).
@@ -1543,18 +1586,18 @@ GuiApplication::force_update_app_menu ()
 #endif
 }
 
-#if defined(__APPLE__)
-// By Thomas Lima (March 7, 2018)
-// 
-// This event interceptor catches MacOS "Open With" event, and KLayout should respond 
-// similarly to the Drop event in MainWindow::dropEvent.
-// 
-// This particular implementation always creates a new window.
-//
-// This was implemented with the inspiration of http://doc.qt.io/qt-5/qfileopenevent.html
 bool
 GuiApplication::event (QEvent *event)
 {
+#if defined(__APPLE__)
+  // By Thomas Lima (March 7, 2018)
+  //
+  // This event interceptor catches MacOS "Open With" event, and KLayout should respond
+  // similarly to the Drop event in MainWindow::dropEvent.
+  //
+  // This particular implementation always creates a new window.
+  //
+  // This was implemented with the inspiration of http://doc.qt.io/qt-5/qfileopenevent.html
   if (event->type() == QEvent::FileOpen) {
       QFileOpenEvent *openEvent = static_cast<QFileOpenEvent *>(event);
       if (mp_mw)
@@ -1566,10 +1609,10 @@ GuiApplication::event (QEvent *event)
         mp_mw->add_mru (file, tech);
       }
   }
+#endif
 
   return QApplication::event(event);
 }
-#endif
 
 
 int

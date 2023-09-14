@@ -1125,9 +1125,8 @@ SearchReplaceDialog::configure (const std::string &name, const std::string &valu
 
   } else if (name == cfg_sr_window_dim) {
 
-    double wdim = m_window_dim;
-    tl::from_string (value, wdim);
-    if (fabs (wdim - m_window_dim) > 1e-6) {
+    lay::Margin wdim = lay::Margin::from_string (value);
+    if (wdim != m_window_dim) {
       m_window_dim = wdim;
       need_update = true;
     }
@@ -1754,15 +1753,17 @@ SearchReplaceDialog::result_selection_changed ()
 
     if (! dbox.empty ()) {
 
+      double window_dim = m_window_dim.get (dbox);
+
       if (m_window == FitCell) {
         view ()->zoom_fit ();
       } else if (m_window == FitMarker) {
-        view ()->zoom_box (dbox.enlarged (db::DVector (m_window_dim, m_window_dim)));
+        view ()->zoom_box (dbox.enlarged (db::DVector (window_dim, window_dim)));
       } else if (m_window == Center) {
         view ()->pan_center (dbox.p1 () + (dbox.p2 () - dbox.p1 ()) * 0.5);
       } else if (m_window == CenterSize) {
-        double w = std::max (dbox.width (), m_window_dim);
-        double h = std::max (dbox.height (), m_window_dim);
+        double w = std::max (dbox.width (), window_dim);
+        double h = std::max (dbox.height (), window_dim);
         db::DPoint center (dbox.p1 () + (dbox.p2 () - dbox.p1 ()) * 0.5);
         db::DVector d (w * 0.5, h * 0.5);
         view ()->zoom_box (db::DBox (center - d, center + d));
@@ -1814,10 +1815,14 @@ BEGIN_PROTECTED
 
   cancel_exec ();
 
-  mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Delete all")));
+  if (mp_view->manager ()) {
+    mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Delete all")));
+  }
   mp_view->cancel ();
   issue_query (build_delete_expression (), 0, false);
-  mp_view->manager ()->commit ();
+  if (mp_view->manager ()) {
+    mp_view->manager ()->commit ();
+  }
 
 END_PROTECTED
 }
@@ -1862,15 +1867,19 @@ BEGIN_PROTECTED
 
   if (! sel.empty ()) {
 
-    if (sender () == delete_selected_button) {
-      mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Delete selected")));
-    } else {
-      mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Replace selected")));
+    if (mp_view->manager ()) {
+      if (sender () == delete_selected_button) {
+        mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Delete selected")));
+      } else {
+        mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Replace selected")));
+      }
     }
 
     mp_view->cancel ();
     issue_query (m_execute_query, &selected_items, false);
-    mp_view->manager ()->commit ();
+    if (mp_view->manager ()) {
+      mp_view->manager ()->commit ();
+    }
 
     issue_query (m_find_query, 0, true);
 
@@ -1889,10 +1898,14 @@ BEGIN_PROTECTED
   m_execute_query.clear ();
   m_find_query.clear ();
 
-  mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Replace all")));
+  if (mp_view->manager ()) {
+    mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Replace all")));
+  }
   mp_view->cancel ();
   issue_query (build_replace_expression (), 0, false);
-  mp_view->manager ()->commit ();
+  if (mp_view->manager ()) {
+    mp_view->manager ()->commit ();
+  }
 
 END_PROTECTED
 }
@@ -1907,10 +1920,14 @@ BEGIN_PROTECTED
   m_execute_query.clear ();
   m_find_query.clear ();
 
-  mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Execute custom query")));
+  if (mp_view->manager ()) {
+    mp_view->manager ()->transaction (tl::to_string (QObject::tr ("Execute custom query")));
+  }
   mp_view->cancel ();
   issue_query (tl::to_string (custom_query->toPlainText ()), 0, true);
-  mp_view->manager ()->commit ();
+  if (mp_view->manager ()) {
+    mp_view->manager ()->commit ();
+  }
 
 END_PROTECTED
 }

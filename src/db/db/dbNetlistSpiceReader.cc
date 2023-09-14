@@ -75,6 +75,7 @@ class SpiceReaderStream
 {
 public:
   SpiceReaderStream ();
+  SpiceReaderStream (const std::string &lib);
   ~SpiceReaderStream ();
 
   void set_stream (tl::InputStream &stream);
@@ -85,9 +86,11 @@ public:
   int line_number () const;
   std::string source () const;
   bool at_end () const;
+  const std::string &lib () const { return m_lib; }
 
   void swap (SpiceReaderStream &other)
   {
+    std::swap (m_lib, other.m_lib);
     std::swap (mp_stream, other.mp_stream);
     std::swap (m_owns_stream, other.m_owns_stream);
     std::swap (mp_text_stream, other.mp_text_stream);
@@ -103,11 +106,18 @@ private:
   int m_line_number;
   std::string m_stored_line;
   bool m_has_stored_line;
+  std::string m_lib;
 };
 
 
 SpiceReaderStream::SpiceReaderStream ()
   : mp_stream (0), m_owns_stream (false), mp_text_stream (0), m_line_number (0), m_stored_line (), m_has_stored_line (false)
+{
+  //  .. nothing yet ..
+}
+
+SpiceReaderStream::SpiceReaderStream (const std::string &lib)
+  : mp_stream (0), m_owns_stream (false), mp_text_stream (0), m_line_number (0), m_stored_line (), m_has_stored_line (false), m_lib (lib)
 {
   //  .. nothing yet ..
 }
@@ -227,9 +237,19 @@ public:
   typedef pin_list_type::const_iterator pin_const_iterator;
 
   SpiceCachedCircuit (const std::string &name)
-    : m_name (name)
+    : m_name (name), m_anonymous (false)
   {
     //  .. nothing yet ..
+  }
+
+  bool is_anonymous () const
+  {
+    return m_anonymous;
+  }
+
+  void set_anonymous (bool f)
+  {
+    m_anonymous = f;
   }
 
   const std::string &name () const
@@ -305,6 +325,7 @@ private:
   parameters_type m_parameters;
   pin_list_type m_pins;
   cards_type m_cards;
+  bool m_anonymous;
 };
 
 static std::string
@@ -372,6 +393,7 @@ private:
   std::vector<std::string> m_paths;
   std::map<std::string, int> m_file_id_per_path;
   std::list<SpiceReaderStream> m_streams;
+  std::list<std::string> m_in_lib;
   SpiceReaderStream m_stream;
   int m_file_id;
   std::map<std::string, SpiceCachedCircuit *> m_cached_circuits;
@@ -382,12 +404,13 @@ private:
   std::set<std::string> m_global_net_names;
   std::vector<std::string> m_global_nets;
 
-  void push_stream (const std::string &path);
+  void push_stream (const std::string &path, const std::string &lib = std::string ());
   void pop_stream ();
   bool at_end ();
   void read_subcircuit (const std::string &sc_name, const std::string &nc_name, const std::vector<db::Net *> &nets);
   void read_circuit (tl::Extractor &ex, const std::string &name);
   bool read_card ();
+  void read_options (tl::Extractor &ex);
   void ensure_circuit ();
   std::string get_line ();
   void error (const std::string &msg);
@@ -488,7 +511,7 @@ SpiceCircuitDict::read (tl::InputStream &stream)
 }
 
 void
-SpiceCircuitDict::push_stream (const std::string &path)
+SpiceCircuitDict::push_stream (const std::string &path, const std::string &lib)
 {
   tl::URI current_uri (m_stream.source ());
   tl::URI new_uri (path);
@@ -504,7 +527,7 @@ SpiceCircuitDict::push_stream (const std::string &path)
     istream = new tl::InputStream (current_uri.resolved (new_uri).to_abstract_path ());
   }
 
-  m_streams.push_back (SpiceReaderStream ());
+  m_streams.push_back (SpiceReaderStream (lib));
   m_streams.back ().swap (m_stream);
   m_stream.set_stream (istream);
 
@@ -556,10 +579,15 @@ SpiceCircuitDict::get_line ()
       if (m_streams.empty ()) {
         break;
       } else {
+        if (! m_stream.lib ().empty ()) {
+          m_in_lib.pop_back ();
+        }
         pop_stream ();
       }
 
     } else {
+
+      bool consider_line = m_in_lib.empty () || (! m_stream.lib ().empty () && m_stream.lib () == m_in_lib.back ());
 
       tl::Extractor ex (lp.first.c_str ());
       if (ex.test_without_case (".include") || ex.test_without_case (".inc")) {
@@ -567,13 +595,57 @@ SpiceCircuitDict::get_line ()
         std::string path;
         ex.read_word_or_quoted (path, allowed_name_chars);
 
-        push_stream (path);
+        if (consider_line) {
+          std::string libname = m_stream.lib ();
+          push_stream (path, libname);
+          if (! libname.empty ()) {
+            m_in_lib.push_back (libname);
+          }
+        }
+
+        ex.expect_end ();
+
+      } else if (ex.test_without_case (".lib")) {
+
+        std::string path_or_libname;
+
+        ex.read_word_or_quoted (path_or_libname, allowed_name_chars);
+        if (! ex.at_end ()) {
+
+          std::string libname;
+          ex.read_word_or_quoted (libname, allowed_name_chars);
+
+          if (consider_line) {
+            libname = mp_netlist->normalize_name (libname);
+            push_stream (path_or_libname, libname);
+            if (! libname.empty ()) {
+              m_in_lib.push_back (std::string ());
+            }
+          }
+
+        } else {
+
+          std::string libname = mp_netlist->normalize_name (path_or_libname);
+          m_in_lib.push_back (libname);
+          ex.expect_end ();
+
+        }
+
+      } else if (ex.test_without_case (".endl")) {
+
+        if (! m_in_lib.empty ()) {
+          m_in_lib.pop_back ();
+        } else {
+          warn (tl::to_string (tr ("Ignoring .endl without .lib")));
+        }
+
+        ex.expect_end ();
 
       } else if (ex.at_end () || ex.test ("*")) {
 
         //  skip empty and comment lines
 
-      } else {
+      } else if (consider_line) {
         break;
       }
 
@@ -613,6 +685,10 @@ SpiceCircuitDict::read_card ()
 
     std::string nc = read_name (ex, mp_netlist);
     read_circuit (ex, nc);
+
+  } else if (ex.test_without_case (".options")) {
+
+    read_options (ex);
 
   } else if (ex.test_without_case (".ends")) {
 
@@ -678,6 +754,56 @@ SpiceCircuitDict::read_card ()
   }
 
   return false;
+}
+
+void
+SpiceCircuitDict::read_options (tl::Extractor &ex)
+{
+  while (! ex.at_end ()) {
+
+    std::string n;
+    ex.read_word_or_quoted (n, allowed_name_chars);
+    n = tl::to_lower_case (n);
+
+    double v = 0.0;
+    std::string w;
+    if (ex.test ("=")) {
+      if (ex.try_read (v)) {
+        //  take value
+      } else {
+        //  skip until end or next space
+        ex.skip ();
+        while (! ex.at_end () && ! isspace (*ex)) {
+          ++ex;
+        }
+      }
+    }
+
+    //  TODO: further options?
+    const double min_value = 1e-18;
+    if (n == "scale") {
+      if (v > min_value) {
+        mp_delegate->options ().scale = v;
+      }
+    } else if (n == "defad") {
+      if (v > min_value) {
+        mp_delegate->options ().defad = v;
+      }
+    } else if (n == "defas") {
+      if (v > min_value) {
+        mp_delegate->options ().defas = v;
+      }
+    } else if (n == "defl") {
+      if (v > min_value) {
+        mp_delegate->options ().defl = v;
+      }
+    } else if (n == "defw") {
+      if (v > min_value) {
+        mp_delegate->options ().defw = v;
+      }
+    }
+
+  }
 }
 
 void
@@ -1067,12 +1193,15 @@ SpiceNetlistBuilder::process_element (tl::Extractor &ex, const std::string &pref
         error (tl::sprintf (tl::to_string (tr ("Subcircuit '%s' not found in netlist")), model));
       } else {
         db::SpiceCachedCircuit *cc_nc = mp_dict->create_cached_circuit (model);
+        cc_nc->set_anonymous (true);
         cc = cc_nc;
         std::vector<std::string> pins;
         pins.resize (nn.size ());
         cc_nc->set_pins (pins);
       }
-    } else {
+    }
+
+    if (! cc->is_anonymous ()) {
       //  issue warnings on unknown parameters which are skipped otherwise
       for (auto p = pv.begin (); p != pv.end (); ++p) {
         if (cc->parameters ().find (p->first) == cc->parameters ().end ()) {
@@ -1148,9 +1277,9 @@ SpiceNetlistBuilder::build_global_nets ()
 NetlistSpiceReader::NetlistSpiceReader (NetlistSpiceReaderDelegate *delegate)
   : mp_delegate (delegate), m_strict (false)
 {
-  static NetlistSpiceReaderDelegate std_delegate;
   if (! delegate) {
-    mp_delegate.reset (&std_delegate);
+    mp_default_delegate.reset (new NetlistSpiceReaderDelegate ());
+    mp_delegate.reset (mp_default_delegate.get ());
   }
 }
 

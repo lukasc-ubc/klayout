@@ -28,6 +28,7 @@
 #include "layConverters.h"
 #include "layDispatcher.h"
 #include "layUtils.h"
+#include "layMargin.h"
 
 #include "ui_MarkerBrowserConfigPage.h"
 #include "ui_MarkerBrowserConfigPage2.h"
@@ -42,6 +43,7 @@ namespace rdb
 
 std::string cfg_rdb_context_mode ("rdb-context-mode");
 std::string cfg_rdb_show_all ("rdb-show-all");
+std::string cfg_rdb_list_shapes ("rdb-list-shapes");
 std::string cfg_rdb_window_state ("rdb-window-state-v2");  // v2: 0.24++
 std::string cfg_rdb_window_mode ("rdb-window-mode");
 std::string cfg_rdb_window_dim ("rdb-window-dim");
@@ -158,9 +160,11 @@ MarkerBrowserConfigPage::setup (lay::Dispatcher *root)
   mp_ui->cbx_window->setCurrentIndex (int (wmode));
 
   //  window dimension
-  double wdim = 1.0;
-  root->config_get (cfg_rdb_window_dim, wdim);
-  mp_ui->le_window->setText (tl::to_qstring (tl::to_string (wdim)));
+  lay::Margin wdim (1.0);
+  std::string wdim_str = wdim.to_string ();
+  root->config_get (cfg_rdb_window_dim, wdim_str);
+  wdim = lay::Margin::from_string (wdim_str);
+  mp_ui->mgn_window->set_margin (wdim);
     
   //  max. marker count
   unsigned int max_marker_count = 1000;
@@ -174,21 +178,18 @@ MarkerBrowserConfigPage::setup (lay::Dispatcher *root)
 void
 MarkerBrowserConfigPage::window_changed (int m)
 {
-  mp_ui->le_window->setEnabled (m == int (rdb::FitMarker) || m == int (rdb::CenterSize));
+  mp_ui->mgn_window->setEnabled (m == int (rdb::FitMarker) || m == int (rdb::CenterSize));
 }
 
 void 
 MarkerBrowserConfigPage::commit (lay::Dispatcher *root)
 {
-  double dim = 1.0;
-  tl::from_string_ext (tl::to_string (mp_ui->le_window->text ()), dim);
-
   unsigned int max_markers_count = 1000;
   tl::from_string_ext (tl::to_string (mp_ui->le_max_markers->text ()), max_markers_count);
 
   root->config_set (cfg_rdb_context_mode, rdb::context_mode_type (mp_ui->cbx_context->currentIndex ()), MarkerBrowserContextModeConverter ());
   root->config_set (cfg_rdb_window_mode, rdb::window_type (mp_ui->cbx_window->currentIndex ()), MarkerBrowserWindowModeConverter ());
-  root->config_set (cfg_rdb_window_dim, dim);
+  root->config_set (cfg_rdb_window_dim, mp_ui->mgn_window->get_margin ().to_string ());
   root->config_set (cfg_rdb_max_marker_count, max_markers_count);
 }
 

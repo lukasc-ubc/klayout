@@ -254,7 +254,6 @@ MacroEditorDialog::MacroEditorDialog (lay::Dispatcher *pr, lym::MacroCollection 
     m_first_show (true), m_debugging_on (true),
     mp_run_macro (0),
     md_update_console_text (this, &MacroEditorDialog::update_console_text),
-    md_search_edited (this, &MacroEditorDialog::do_search_edited),
     m_in_event_handler (false),
     m_os (OS_none),
     m_new_line (true),
@@ -386,9 +385,6 @@ MacroEditorDialog::MacroEditorDialog (lay::Dispatcher *pr, lym::MacroCollection 
   connect (actionUseRegularExpressions, SIGNAL (triggered ()), this, SLOT (search_editing ()));
   connect (actionCaseSensitive, SIGNAL (triggered ()), this, SLOT (search_editing ()));
 
-  addAction (actionSearchReplace);
-  connect (actionSearchReplace, SIGNAL (triggered ()), this, SLOT (search_replace ()));
-
   searchEditBox->set_clear_button_enabled (true);
   searchEditBox->set_options_button_enabled (true);
   searchEditBox->set_options_menu (m);
@@ -402,6 +398,7 @@ MacroEditorDialog::MacroEditorDialog (lay::Dispatcher *pr, lym::MacroCollection 
   replaceText->setPlaceholderText (tr ("Replace text ..."));
 #endif
 
+  connect (closeButton, SIGNAL (clicked ()), this, SLOT (close_button_clicked ()));
   connect (forwardButton, SIGNAL (clicked ()), this, SLOT (forward ()));
   connect (backwardButton, SIGNAL (clicked ()), this, SLOT (backward ()));
 
@@ -429,6 +426,17 @@ MacroEditorDialog::MacroEditorDialog (lay::Dispatcher *pr, lym::MacroCollection 
   tabWidget->addAction (action);
   action = new QAction (tr ("Close All Right"), this);
   connect (action, SIGNAL (triggered ()), this, SLOT (close_all_right ()));
+  tabWidget->addAction (action);
+
+  action = new QAction (this);
+  action->setSeparator (true);
+  tabWidget->addAction (action);
+
+  mp_tabs_menu = new QMenu ();
+
+  action = new QAction (tr ("Tabs"), this);
+  action->setMenu (mp_tabs_menu);
+  connect (mp_tabs_menu, SIGNAL (aboutToShow ()), this, SLOT (tabs_menu_about_to_show ()));
   tabWidget->addAction (action);
 
   dbgOn->setEnabled (true);
@@ -495,6 +503,7 @@ MacroEditorDialog::MacroEditorDialog (lay::Dispatcher *pr, lym::MacroCollection 
   connect (replaceModeButton, SIGNAL (clicked ()), this, SLOT (replace_mode_button_clicked ()));
   connect (replaceNextButton, SIGNAL (clicked ()), this, SLOT (replace_next_button_clicked ()));
   connect (findNextButton, SIGNAL (clicked ()), this, SLOT (find_next_button_clicked ()));
+  connect (findPrevButton, SIGNAL (clicked ()), this, SLOT (find_prev_button_clicked ()));
   connect (replaceAllButton, SIGNAL (clicked ()), this, SLOT (replace_all_button_clicked ()));
   connect (allVariables, SIGNAL (clicked (bool)), variableList, SLOT (set_show_all (bool)));
 
@@ -671,6 +680,34 @@ MacroEditorDialog *
 MacroEditorDialog::instance () 
 {
   return s_macro_editor_instance;
+}
+
+void
+MacroEditorDialog::tab_menu_selected ()
+{
+  QAction *action = dynamic_cast<QAction *> (sender ());
+  if (action) {
+    tabWidget->setCurrentIndex (action->data ().toInt ());
+  }
+}
+
+void
+MacroEditorDialog::tabs_menu_about_to_show ()
+{
+  mp_tabs_menu->clear ();
+
+  for (int i = 0; i < tabWidget->count (); ++i) {
+    MacroEditorPage *page = dynamic_cast<MacroEditorPage *> (tabWidget->widget (i));
+    if (page) {
+      QAction *action = new QAction (tl::to_qstring (page->path ()), mp_tabs_menu);
+      action->setData (i);
+      connect (action, SIGNAL (triggered ()), this, SLOT (tab_menu_selected ()));
+      if (page->macro () == mp_run_macro) {
+        action->setIcon (QIcon (":/run_16px.png"));
+      }
+      mp_tabs_menu->addAction (action);
+    }
+  }
 }
 
 void
@@ -1771,8 +1808,6 @@ MacroEditorDialog::current_tab_changed (int index)
     }
   }
 
-  //  clear the search
-  searchEditBox->clear ();
   replaceFrame->setEnabled (page && page->macro () && !page->macro ()->is_readonly ());
 
   apply_search ();
@@ -1974,7 +2009,7 @@ MacroEditorDialog::find_next_button_clicked ()
 
   apply_search (true);
   page->find_next ();
-  if (sender () != searchEditBox && sender () != replaceText) {
+  if (! searchEditBox->hasFocus () && ! replaceText->hasFocus ()) {
     set_editor_focus ();
   }
 }
@@ -1989,7 +2024,7 @@ MacroEditorDialog::find_prev_button_clicked ()
 
   apply_search (true);
   page->find_prev ();
-  if (sender () != searchEditBox && sender () != replaceText) {
+  if (! searchEditBox->hasFocus () && ! replaceText->hasFocus ()) {
     set_editor_focus ();
   }
 }
@@ -2004,7 +2039,7 @@ MacroEditorDialog::replace_next_button_clicked ()
 
   apply_search (true);
   page->replace_and_find_next (replaceText->text ());
-  if (sender () != replaceText) {
+  if (! searchEditBox->hasFocus () && ! replaceText->hasFocus ()) {
     set_editor_focus ();
   }
 }
@@ -2023,7 +2058,7 @@ MacroEditorDialog::replace_all_button_clicked ()
 }
 
 void
-MacroEditorDialog::search_requested (const QString &s)
+MacroEditorDialog::search_requested (const QString &s, bool prev)
 {
   if (! s.isNull ()) {
     searchEditBox->setText (s);
@@ -2031,13 +2066,21 @@ MacroEditorDialog::search_requested (const QString &s)
     searchEditBox->selectAll ();
   }
   searchEditBox->setFocus ();
-  search_editing ();
-}
 
-void
-MacroEditorDialog::search_replace ()
-{
-  searchEditBox->setFocus (Qt::TabFocusReason);
+  MacroEditorPage *page = dynamic_cast<MacroEditorPage *> (tabWidget->currentWidget ());
+  if (! page) {
+    return;
+  }
+
+  apply_search ();
+  page->find_reset (); //  search from the initial position
+  if (! page->has_multi_block_selection ()) {
+    if (! prev) {
+      page->find_next ();
+    } else {
+      page->find_prev ();
+    }
+  }
 }
 
 void
@@ -2050,15 +2093,9 @@ MacroEditorDialog::search_editing ()
 
   apply_search ();
   page->find_reset (); //  search from the initial position
-  page->find_next ();
-}
-
-void 
-MacroEditorDialog::search_edited ()
-{
-  //  since we want to move the focus to the text field, we have to do this in the deferred method
-  //  (this method is called from an event handler and setFocus does not have an effect then)
-  md_search_edited ();
+  if (! page->has_multi_block_selection ()) {
+    page->find_next ();
+  }
 }
 
 void
@@ -2074,7 +2111,7 @@ MacroEditorDialog::search_finished ()
 }
 
 void
-MacroEditorDialog::do_search_edited ()
+MacroEditorDialog::search_edited ()
 {
   MacroEditorPage *page = dynamic_cast<MacroEditorPage *> (tabWidget->currentWidget ());
   if (! page) {
@@ -2083,8 +2120,9 @@ MacroEditorDialog::do_search_edited ()
 
   apply_search ();
   page->find_reset (); //  search from the initial position
-  page->find_next ();
-  set_editor_focus ();
+  if (! page->has_multi_block_selection ()) {
+    page->find_next ();
+  }
 }
 
 void
@@ -2365,9 +2403,18 @@ END_PROTECTED
 }
 
 void
+MacroEditorDialog::close_requested ()
+{
+  MacroEditorPage *page = dynamic_cast<MacroEditorPage *> (sender ());
+  if (! m_in_exec && page) {
+    tab_close_requested (tabWidget->indexOf (page));
+  }
+}
+
+void
 MacroEditorDialog::tab_close_requested (int index)
 {
-  if (m_in_exec) {
+  if (m_in_exec || index < 0) {
     return;
   }
 
@@ -2596,65 +2643,64 @@ BEGIN_PROTECTED
     return;
   }
 
-  std::set<std::string> modified_files;
-  for (std::map <lym::Macro *, MacroEditorPage *>::const_iterator m = m_tab_widgets.begin (); m != m_tab_widgets.end (); ++m) {
-    if (m->first->is_modified ()) {
-      modified_files.insert (m->first->path ());
+  std::map<std::string, MacroEditorPage *> path_to_page;
+  for (int i = 0; i < tabWidget->count (); ++i) {
+    MacroEditorPage *page = dynamic_cast<MacroEditorPage *> (tabWidget->widget (i));
+    if (page) {
+      path_to_page.insert (std::make_pair (page->path (), page));
     }
   }
 
-  std::vector<QString> conflicts;
   for (std::vector<QString>::const_iterator f = m_changed_files.begin (); f != m_changed_files.end (); ++f) {
-    if (modified_files.find (tl::to_string (*f)) != modified_files.end ()) {
-      conflicts.push_back (*f);
+
+    std::string fn = tl::to_string (*f);
+    auto w = path_to_page.find (fn);
+    if (w == path_to_page.end ()) {
+      continue;
+    }
+
+    if (w->second->macro () && w->second->macro ()->is_modified ()) {
+
+      lay::MacroEditorNotification n ("reload", tl::to_string (tr ("Macro has changed on disk, but was modified")), tl::Variant (fn));
+      n.add_action ("reload", tl::to_string (tr ("Reload and discard changes")));
+      w->second->add_notification (n);
+
+    } else {
+
+      lay::MacroEditorNotification n ("reload", tl::to_string (tr ("Macro has changed on disk")), tl::Variant (fn));
+      n.add_action ("reload", tl::to_string (tr ("Reload")));
+      w->second->add_notification (n);
+
     }
   }
+
   for (std::vector<QString>::const_iterator f = m_removed_files.begin (); f != m_removed_files.end (); ++f) {
-    if (modified_files.find (tl::to_string (*f)) != modified_files.end ()) {
-      conflicts.push_back (*f);
+
+    std::string fn = tl::to_string (*f);
+    auto w = path_to_page.find (fn);
+    if (w == path_to_page.end ()) {
+      continue;
+    }
+
+    if (w->second->macro () && w->second->macro ()->is_modified ()) {
+
+      lay::MacroEditorNotification n ("close", tl::to_string (tr ("Macro has been removed on disk, but was modified")), tl::Variant (fn));
+      n.add_action ("close", tl::to_string (tr ("Close tab and discard changes")));
+      w->second->add_notification (n);
+
+    } else {
+
+      lay::MacroEditorNotification n ("close", tl::to_string (tr ("Macro has been removed on disk")), tl::Variant (fn));
+      n.add_action ("close", tl::to_string (tr ("Close tab")));
+      w->second->add_notification (n);
+
     }
   }
 
-  QString msg;
-
-  if (m_changed_files.size () + m_removed_files.size () == 1) {
-    msg = QObject::tr ("The following file has been changed on disk:\n\n");
-    for (std::vector<QString>::const_iterator f = m_changed_files.begin (); f != m_changed_files.end (); ++f) {
-      msg += QString::fromUtf8 ("  %1 (modified)\n").arg (*f);
-    }
-    for (std::vector<QString>::const_iterator f = m_removed_files.begin (); f != m_removed_files.end (); ++f) {
-      msg += QString::fromUtf8 ("  %1 (removed)\n").arg (*f);
-    }
-    if (!conflicts.empty ()) {
-      msg += tr ("\nThis file has been modified in the editor as well.\nRefresh this file and discard changes?");
-    } else {
-      msg += tr ("\nRefresh this file?");
-    }
-  } else {
-    msg = QObject::tr ("The following files have been changed on disk:\n\n");
-    for (std::vector<QString>::const_iterator f = m_changed_files.begin (); f != m_changed_files.end (); ++f) {
-      msg += QString::fromUtf8 ("  %1 (modified)\n").arg (*f);
-    }
-    for (std::vector<QString>::const_iterator f = m_removed_files.begin (); f != m_removed_files.end (); ++f) {
-      msg += QString::fromUtf8 ("  %1 (removed)\n").arg (*f);
-    }
-    if (!conflicts.empty ()) {
-      msg += tr("\nSome of these files are modified on disk and in the editor:\n\n");
-      for (std::vector<QString>::const_iterator f = conflicts.begin (); f != conflicts.end (); ++f) {
-        msg += QString::fromUtf8 ("  %1 (conflict)\n").arg (*f);
-      }
-      msg += tr ("\nRefresh these and the other files and discard all changes?");
-    } else {
-      msg += tr ("\nRefresh those files?");
-    }
-  }
+  refresh_file_watcher ();
 
   m_changed_files.clear ();
   m_removed_files.clear ();
-
-  if (QMessageBox::question (this, tr ("Refresh Files"), msg, QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
-    reload_macros ();
-  }
 
 END_PROTECTED
 }
@@ -2779,7 +2825,7 @@ BEGIN_PROTECTED
   std::string new_path = tl::to_string (QFileInfo (new_dir).absoluteFilePath ());
   paths.push_back (std::make_pair (new_path, cat));
 
-  lym::MacroCollection *c = mp_root->add_folder (tl::to_string (QObject::tr ("Project")) + " - " + new_path, new_path, cat, false);
+  lym::MacroCollection *c = mp_root->add_folder (tl::to_string (QObject::tr ("Project")) + " - " + new_path, new_path, cat, false /* writeable */, false /* do not auto-create folders */);
   if (!c) {
     throw tl::Exception (tl::to_string (QObject::tr ("The selected directory is already installed as custom location")));
   }
@@ -3514,8 +3560,9 @@ MacroEditorDialog::create_page (lym::Macro *macro)
   editor->set_font (m_font_family, m_font_size);
   editor->exec_model ()->set_run_mode (m_in_exec);
   editor->connect_macro (macro);
+  connect (editor.get (), SIGNAL (close_requested ()), this, SLOT (close_requested ()));
   connect (editor.get (), SIGNAL (help_requested (const QString &)), this, SLOT (help_requested (const QString &)));
-  connect (editor.get (), SIGNAL (search_requested (const QString &)), this, SLOT (search_requested (const QString &)));
+  connect (editor.get (), SIGNAL (search_requested (const QString &, bool)), this, SLOT (search_requested (const QString &, bool)));
   connect (editor.get (), SIGNAL (edit_trace (bool)), this, SLOT (add_edit_trace (bool)));
   return editor.release ();
 }
@@ -3741,8 +3788,12 @@ MacroEditorDialog::run (int stop_stack_depth, lym::Macro *macro)
     set_run_macro (macro);
 
     try {
+
+      write_str (tl::sprintf (tl::to_string (tr ("Running macro %s\n")), macro->path ()).c_str (), OS_echo);
+
       macro->run ();
       m_stop_stack_depth = -1;
+
     } catch (tl::ExitException &) {
       m_stop_stack_depth = -1;
       //  .. ignore exit exceptions ..

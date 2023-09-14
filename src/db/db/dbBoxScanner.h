@@ -376,15 +376,12 @@ private:
 
         while (cc != current) {
           rec.finish (cc->first, cc->second);
-          typename std::set<std::pair<const Obj *, const Obj *> >::iterator s;
-          s = seen.lower_bound (std::make_pair (cc->first, (const Obj *)0));
+          auto s = seen.lower_bound (std::make_pair (cc->first, (const Obj *)0));
+          auto s0 = s;
           while (s != seen.end () && s->first == cc->first) {
-            seen.erase (s++);
+            ++s;
           }
-          s = seen.lower_bound (std::make_pair ((const Obj *)0, cc->first));
-          while (s != seen.end () && s->second == cc->first) {
-            seen.erase (s++);
-          }
+          seen.erase (s0, s);
           ++cc;
         }
 
@@ -429,8 +426,8 @@ private:
           for (iterator_type i = f0; i != f; ++i) {
             for (iterator_type j = c; j < i; ++j) {
               if (bs_boxes_overlap (bc (*i->first), bc (*j->first), enl)) {
-                if (seen.insert (std::make_pair (i->first, j->first)).second) {
-                  seen.insert (std::make_pair (j->first, i->first));
+                if (seen.find (std::make_pair (i->first, j->first)) == seen.end () && seen.find (std::make_pair (j->first, i->first)) == seen.end ()) {
+                  seen.insert (std::make_pair (i->first, j->first));
                   rec.add (i->first, i->second, j->first, j->second);
                   if (rec.stop ()) {
                     return false;
@@ -541,7 +538,7 @@ public:
    *  @brief Default ctor
    */
   box_scanner2 (bool report_progress = false, const std::string &progress_desc = std::string ())
-    : m_fill_factor (2), m_scanner_thr (100),
+    : m_fill_factor (2), m_scanner_thr (100), m_scanner_thr1 (10),
       m_report_progress (report_progress), m_progress_desc (progress_desc)
   {
     //  .. nothing yet ..
@@ -565,6 +562,26 @@ public:
   size_t scanner_threshold () const
   {
     return m_scanner_thr;
+  }
+
+  /**
+   *  @brief Sets the scanner threshold per class
+   *
+   *  This value determines for how many elements in one class the implementation switches to the scanner
+   *  implementation instead of the plain element-by-element interaction test.
+   *  The default value is 10.
+   */
+  void set_scanner_threshold1 (size_t n)
+  {
+    m_scanner_thr1 = n;
+  }
+
+  /**
+   *  @brief Gets the scanner threshold per class
+   */
+  size_t scanner_threshold1 () const
+  {
+    return m_scanner_thr1;
   }
 
   /**
@@ -670,7 +687,7 @@ private:
   container_type1 m_pp1;
   container_type2 m_pp2;
   double m_fill_factor;
-  size_t m_scanner_thr;
+  size_t m_scanner_thr, m_scanner_thr1;
   bool m_report_progress;
   std::string m_progress_desc;
 
@@ -735,7 +752,7 @@ private:
         rec.finish2 (i->first, i->second);
       }
 
-    } else if (m_pp1.size () + m_pp2.size () <= m_scanner_thr) {
+    } else if (m_pp1.size () + m_pp2.size () <= m_scanner_thr || m_pp2.size () <= m_scanner_thr1 || m_pp1.size () <= m_scanner_thr1) {
 
       //  below m_scanner_thr elements use the brute force approach which is faster in that case
 
@@ -791,21 +808,23 @@ private:
 
         while (cc1 != current1) {
           rec.finish1 (cc1->first, cc1->second);
-          typename std::set<std::pair<const Obj1 *, const Obj2 *> >::iterator s;
-          s = seen1.lower_bound (std::make_pair (cc1->first, (const Obj2 *)0));
+          auto s = seen1.lower_bound (std::make_pair (cc1->first, (const Obj2 *)0));
+          auto s0 = s;
           while (s != seen1.end () && s->first == cc1->first) {
-            seen1.erase (s++);
+            ++s;
           }
+          seen1.erase (s0, s);
           ++cc1;
         }
 
         while (cc2 != current2) {
           rec.finish2 (cc2->first, cc2->second);
-          typename std::set<std::pair<const Obj2 *, const Obj1 *> >::iterator s;
-          s = seen2.lower_bound (std::make_pair (cc2->first, (const Obj1 *)0));
+          auto s = seen2.lower_bound (std::make_pair (cc2->first, (const Obj1 *)0));
+          auto s0 = s;
           while (s != seen2.end () && s->first == cc2->first) {
-            seen2.erase (s++);
+            ++s;
           }
+          seen2.erase (s0, s);
           ++cc2;
         }
 
@@ -883,7 +902,7 @@ private:
             x = xx;
 
             if (m_report_progress) {
-              progress->set (std::min (f1 - m_pp1.begin (), f2 - m_pp2.begin ()));
+              progress->set ((f1 - m_pp1.begin ()) + (f2 - m_pp2.begin ()));
             }
 
           }

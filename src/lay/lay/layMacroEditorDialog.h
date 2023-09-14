@@ -212,6 +212,7 @@ private slots:
   void search_editing ();
   void search_finished ();
   void tab_close_requested (int);
+  void close_requested ();
   void close_all ();
   void close_all_but_this ();
   void close_all_left ();
@@ -222,7 +223,7 @@ private slots:
   void find_next_button_clicked ();
   void find_prev_button_clicked ();
   void help_requested (const QString &s);
-  void search_requested (const QString &s);
+  void search_requested (const QString &s, bool prev);
   void macro_changed (lym::Macro *macro);
   void macro_deleted (lym::Macro *macro);
   void macro_collection_deleted (lym::MacroCollection *collection);
@@ -232,6 +233,8 @@ private slots:
   void del_watches ();
   void clear_watches ();
   void set_debugging_on (bool on);
+  void tabs_menu_about_to_show ();
+  void tab_menu_selected ();
 
   //  edit trace navigation
   void forward ();
@@ -245,7 +248,6 @@ protected slots:
   void file_changed (const QString &path);
   void file_removed (const QString &path);
   void clear_log ();
-  void search_replace ();
   void apply_search ()
   {
     apply_search (false);
@@ -312,7 +314,6 @@ private:
   lym::Macro *mp_run_macro;
   std::vector<lym::Macro *> m_macro_templates;
   tl::DeferredMethod<MacroEditorDialog> md_update_console_text;
-  tl::DeferredMethod<MacroEditorDialog> md_search_edited;
   TextEditWidget *mp_console_text;
   std::map <lym::Macro *, MacroEditorPage *> m_tab_widgets;
   int m_history_index;
@@ -359,6 +360,7 @@ private:
   std::vector<QString> m_changed_files, m_removed_files;
   tl::DeferredMethod<MacroEditorDialog> dm_refresh_file_watcher;
   tl::DeferredMethod<MacroEditorDialog> dm_update_ui_to_run_mode;
+  QMenu *mp_tabs_menu;
 };
 
 }

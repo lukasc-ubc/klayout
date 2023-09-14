@@ -22,6 +22,7 @@
 
 
 #include "gsiDecl.h"
+#include "gsiDeclDbMetaInfo.h"
 #include "dbLayout.h"
 #include "dbClip.h"
 #include "dbRecursiveShapeIterator.h"
@@ -127,6 +128,19 @@ size_t hash_value (const db::LayerProperties *l)
   return std::hfunc (*l);
 }
 
+static bool log_equal_ext (const db::LayerProperties *lp1, const db::LayerProperties &lp2)
+{
+  if (lp1->log_equal (lp2)) {
+    return true;
+  }
+  //  compare by name as fallback if one argument is named and the other is not
+  //  (this gives a way to look up
+  if ((lp1->is_named () || lp2.is_named()) && ! lp1->name.empty () && ! lp2.name.empty ()) {
+    return lp1->name == lp2.name;
+  }
+  return false;
+}
+
 //  since there already exists a "LayerProperties" object, we call this one "LayerInfo"
 Class<db::LayerProperties> decl_LayerInfo ("db", "LayerInfo",
   gsi::constructor ("new", &ctor_layer_info_default, 
@@ -193,14 +207,31 @@ Class<db::LayerProperties> decl_LayerInfo ("db", "LayerInfo",
     "\n"
     "This method was added in version 0.18.\n"
   ) +
-  gsi::method ("is_equivalent?", &db::LayerProperties::log_equal, gsi::arg ("b"),
+  gsi::method_ext ("is_equivalent?", &log_equal_ext, gsi::arg ("b"),
     "@brief Equivalence of two layer info objects\n"
     "@return True, if both are equivalent\n"
     "\n"
-    "First, layer and datatype are compared. The name is of second order and used only if no layer or datatype is given.\n"
-    "This is basically a weak comparison that reflects the search preferences.\n"
+    "First, layer and datatype are compared. The name is of second order and used only if no layer or datatype is given "
+    "for one of the operands.\n"
+    "This is basically a weak comparison that reflects the search preferences. It is the basis for \\Layout#find_layer.\n"
+    "Here are some examples:\n"
     "\n"
-    "This method was added in version 0.18.\n"
+    "@code\n"
+    "# no match as layer/datatypes or names differ:\n"
+    "RBA::LayerInfo::new(1, 17).is_equivalent?(RBA::LayerInfo::new(1, 18)) -> false\n"
+    "RBA::LayerInfo::new('metal1').is_equivalent?(RBA::LayerInfo::new('m1')) -> false\n"
+    "# exact match for numbered or named layers:\n"
+    "RBA::LayerInfo::new(1, 17).is_equivalent?(RBA::LayerInfo::new(1, 17)) -> true\n"
+    "RBA::LayerInfo::new('metal1').is_equivalent?(RBA::LayerInfo::new('metal1')) -> true\n"
+    "# match as names are second priority over layer/datatypes:\n"
+    "RBA::LayerInfo::new(1, 17, 'metal1').is_equivalent?(RBA::LayerInfo::new(1, 17, 'm1')) -> true\n"
+    "# match as name matching is fallback:\n"
+    "RBA::LayerInfo::new(1, 17, 'metal1').is_equivalent?(RBA::LayerInfo::new('metal1')) -> true\n"
+    "# no match as neither names or layer/datatypes match:\n"
+    "RBA::LayerInfo::new(1, 17, 'metal1').is_equivalent?(RBA::LayerInfo::new('m1')) -> false\n"
+    "@/code\n"
+    "\n"
+    "This method was added in version 0.18 and modified to compare non-named vs. named layers in version 0.28.11.\n"
   ) +
   gsi::method_ext ("hash", &hash_value,
     "@brief Computes a hash value\n"
@@ -503,9 +534,15 @@ static tl::Variant find_layer (db::Layout *l, const db::LayerProperties &lp)
     //  for a null layer info always return nil
     return tl::Variant ();
   } else {
-    //  if we have a layer with the requested properties already, return this.
+    //  if we have a layer with the requested properties already, return this one.
+    //  first pass: exact match
+    int index = l->get_layer_maybe (lp);
+    if (index >= 0) {
+      return tl::Variant ((unsigned int) index);
+    }
+    //  second pass: relaxed match
     for (db::Layout::layer_iterator li = l->begin_layers (); li != l->end_layers (); ++li) {
-      if ((*li).second->log_equal (lp)) {
+      if (log_equal_ext ((*li).second, lp)) {
         return tl::Variant ((*li).first);
       }
     }
@@ -529,7 +566,7 @@ static tl::Variant find_layer3 (db::Layout *l, int ln, int dn, const std::string
   return find_layer (l, db::LayerProperties (ln, dn, name));
 }
 
-static std::vector<unsigned int> layer_indices (const db::Layout *l)
+static std::vector<unsigned int> layer_indexes (const db::Layout *l)
 {
   std::vector<unsigned int> layers;
   for (unsigned int i = 0; i < l->layers (); ++i) {
@@ -902,39 +939,30 @@ static db::Cell *create_cell4 (db::Layout *layout, const std::string &name, cons
   return &layout->cell (layout->get_lib_proxy (lib, lib_cell));
 }
 
-static db::MetaInfo *layout_meta_info_ctor (const std::string &name, const std::string &value, const std::string &description)
+static void layout_add_meta_info (db::Layout *layout, const MetaInfo &mi)
 {
-  return new db::MetaInfo (name, description, value);
+  layout->add_meta_info (mi.name, db::MetaInfo (mi.description, mi.value, mi.persisted));
 }
 
-static void layout_meta_set_name (db::MetaInfo *mi, const std::string &n)
+static MetaInfo *layout_get_meta_info (db::Layout *layout, const std::string &name)
 {
-  mi->name = n;
+  if (layout->has_meta_info (name)) {
+    const db::MetaInfo &value = layout->meta_info (name);
+    return new MetaInfo (name, value);
+  } else {
+    return 0;
+  }
 }
 
-static const std::string &layout_meta_get_name (const db::MetaInfo *mi)
+static const tl::Variant &layout_get_meta_info_value (db::Layout *layout, const std::string &name)
 {
-  return mi->name;
+  const db::MetaInfo &value = layout->meta_info (name);
+  return value.value;
 }
 
-static void layout_meta_set_value (db::MetaInfo *mi, const std::string &n)
+static MetaInfoIterator layout_each_meta_info (const db::Layout *layout)
 {
-  mi->value = n;
-}
-
-static const std::string &layout_meta_get_value (const db::MetaInfo *mi)
-{
-  return mi->value;
-}
-
-static void layout_meta_set_description (db::MetaInfo *mi, const std::string &n)
-{
-  mi->description = n;
-}
-
-static const std::string &layout_meta_get_description (const db::MetaInfo *mi)
-{
-  return mi->description;
+  return MetaInfoIterator (layout, layout->begin_meta (), layout->end_meta ());
 }
 
 static void scale_and_snap1 (db::Layout *layout, db::Cell &cell, db::Coord g, db::Coord m, db::Coord d)
@@ -997,45 +1025,6 @@ static void move_tree_shapes3 (db::Layout *layout, db::Layout &source_layout, co
   db::move_shapes (*layout, source_layout, trans, cm.source_cells (), cm.table (), lm.table ());
 }
 
-Class<db::MetaInfo> decl_LayoutMetaInfo ("db", "LayoutMetaInfo",
-  gsi::constructor ("new", &layout_meta_info_ctor, gsi::arg ("name"), gsi::arg ("value"), gsi::arg ("description", std::string ()),
-    "@brief Creates a layout meta info object\n"
-    "@param name The name\n"
-    "@param value The value\n"
-    "@param description An optional description text\n"
-  ) +
-  gsi::method_ext ("name", &layout_meta_get_name,
-    "@brief Gets the name of the layout meta info object\n"
-  ) +
-  gsi::method_ext ("name=", &layout_meta_set_name,
-    "@brief Sets the name of the layout meta info object\n"
-  ) +
-  gsi::method_ext ("value", &layout_meta_get_value,
-    "@brief Gets the value of the layout meta info object\n"
-  ) +
-  gsi::method_ext ("value=", &layout_meta_set_value,
-    "@brief Sets the value of the layout meta info object\n"
-  ) +
-  gsi::method_ext ("description", &layout_meta_get_description,
-    "@brief Gets the description of the layout meta info object\n"
-  ) +
-  gsi::method_ext ("description=", &layout_meta_set_description,
-    "@brief Sets the description of the layout meta info object\n"
-  ),
-  "@brief A piece of layout meta information\n"
-  "Layout meta information is basically additional data that can be attached to a layout. "
-  "Layout readers may generate meta information and some writers will add layout information to "
-  "the layout object. Some writers will also read meta information to determine certain attributes.\n"
-  "\n"
-  "Multiple layout meta information objects can be attached to one layout using \\Layout#add_meta_info. "
-  "Meta information is identified by a unique name and carries a string value plus an optional description string. "
-  "The description string is for information only and is not evaluated by code.\n"
-  "\n"
-  "See also \\Layout#each_meta_info and \\Layout#meta_info_value and \\Layout#remove_meta_info"
-  "\n"
-  "This class has been introduced in version 0.25."
-);
-
 static void dtransform (db::Layout *layout, const db::DTrans &trans)
 {
   db::CplxTrans dbu_trans (layout->dbu ());
@@ -1046,6 +1035,22 @@ static void dtransform_cplx (db::Layout *layout, const db::DCplxTrans &trans)
 {
   db::CplxTrans dbu_trans (layout->dbu ());
   layout->transform (dbu_trans.inverted () * trans * dbu_trans);
+}
+
+static db::LayerProperties get_properties (const db::Layout *layout, unsigned int index)
+{
+  if (layout->is_valid_layer (index)) {
+    return layout->get_properties (index);
+  } else {
+    return db::LayerProperties ();
+  }
+}
+
+static void set_properties (db::Layout *layout, unsigned int index, const db::LayerProperties &props)
+{
+  if (layout->is_valid_layer (index)) {
+    layout->set_properties (index, props);
+  }
 }
 
 Class<db::Layout> decl_Layout ("db", "Layout",
@@ -1097,27 +1102,42 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "\n"
     "This method has been introduced in version 0.27.9."
   ) +
-  gsi::method ("add_meta_info", &db::Layout::add_meta_info, gsi::arg ("info"),
+  gsi::method_ext ("add_meta_info", &layout_add_meta_info, gsi::arg ("info"),
     "@brief Adds meta information to the layout\n"
     "See \\LayoutMetaInfo for details about layouts and meta information."
     "\n"
     "This method has been introduced in version 0.25."
   ) +
-  gsi::method ("remove_meta_info", &db::Layout::remove_meta_info, gsi::arg ("name"),
+  gsi::method ("clear_meta_info", static_cast<void (db::Layout::*) ()> (&db::Layout::clear_meta),
+    "@brief Clears the meta information of the layout\n"
+    "See \\LayoutMetaInfo for details about layouts and meta information."
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::method ("remove_meta_info", static_cast<void (db::Layout::*) (const std::string &name)> (&db::Layout::remove_meta_info), gsi::arg ("name"),
     "@brief Removes meta information from the layout\n"
     "See \\LayoutMetaInfo for details about layouts and meta information."
     "\n"
     "This method has been introduced in version 0.25."
   ) +
-  gsi::method ("meta_info_value", &db::Layout::meta_info_value, gsi::arg ("name"),
+  gsi::method_ext ("meta_info_value", &layout_get_meta_info_value, gsi::arg ("name"),
     "@brief Gets the meta information value for a given name\n"
     "See \\LayoutMetaInfo for details about layouts and meta information.\n"
     "\n"
-    "If no meta information with the given name exists, an empty string will be returned.\n"
+    "If no meta information with the given name exists, a nil value will be returned.\n"
+    "A more generic version that delivers all fields of the meta information is \\meta_info.\n"
     "\n"
-    "This method has been introduced in version 0.25."
+    "This method has been introduced in version 0.25. Starting with version 0.28.8, the value is of variant type instead of string only.\n"
   ) +
-  gsi::iterator ("each_meta_info", &db::Layout::begin_meta, &db::Layout::end_meta,
+  gsi::factory_ext ("meta_info", &layout_get_meta_info, gsi::arg ("name"),
+    "@brief Gets the meta information for a given name\n"
+    "See \\LayoutMetaInfo for details about layouts and meta information.\n"
+    "\n"
+    "If no meta information with the given name exists, nil is returned.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8.\n"
+  ) +
+  gsi::iterator_ext ("each_meta_info", &layout_each_meta_info,
     "@brief Iterates over the meta information of the layout\n"
     "See \\LayoutMetaInfo for details about layouts and meta information.\n"
     "\n"
@@ -1406,7 +1426,7 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If the region is (conceptionally) a flat region, it will be inserted into the cell's shapes "
     "list as a flat sequence of polygons.\n"
     "If the region is a deep (hierarchical) region, it will create a subhierarchy below the given "
-    "cell and it's shapes will be put into the respective cells. Suitable subcells will be picked "
+    "cell and its shapes will be put into the respective cells. Suitable subcells will be picked "
     "for inserting the shapes. If a hierarchy already exists below the given cell, the algorithm will "
     "try to reuse this hierarchy.\n"
     "\n"
@@ -1418,7 +1438,7 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If the edge collection is (conceptionally) flat, it will be inserted into the cell's shapes "
     "list as a flat sequence of edges.\n"
     "If the edge collection is deep (hierarchical), it will create a subhierarchy below the given "
-    "cell and it's edges will be put into the respective cells. Suitable subcells will be picked "
+    "cell and its edges will be put into the respective cells. Suitable subcells will be picked "
     "for inserting the edges. If a hierarchy already exists below the given cell, the algorithm will "
     "try to reuse this hierarchy.\n"
     "\n"
@@ -1430,7 +1450,7 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If the edge pair collection is (conceptionally) flat, it will be inserted into the cell's shapes "
     "list as a flat sequence of edge pairs.\n"
     "If the edge pair collection is deep (hierarchical), it will create a subhierarchy below the given "
-    "cell and it's edge pairs will be put into the respective cells. Suitable subcells will be picked "
+    "cell and its edge pairs will be put into the respective cells. Suitable subcells will be picked "
     "for inserting the edge pairs. If a hierarchy already exists below the given cell, the algorithm will "
     "try to reuse this hierarchy.\n"
     "\n"
@@ -1442,7 +1462,7 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If the text collection is (conceptionally) flat, it will be inserted into the cell's shapes "
     "list as a flat sequence of texts.\n"
     "If the text collection is deep (hierarchical), it will create a subhierarchy below the given "
-    "cell and it's texts will be put into the respective cells. Suitable subcells will be picked "
+    "cell and its texts will be put into the respective cells. Suitable subcells will be picked "
     "for inserting the texts. If a hierarchy already exists below the given cell, the algorithm will "
     "try to reuse this hierarchy.\n"
     "\n"
@@ -1587,7 +1607,19 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If a layer with the given properties already exists, this method will return the index of that layer."
     "If no such layer exists, it will return nil.\n"
     "\n"
-    "This method has been introduced in version 0.23.\n"
+    "In contrast to \\layer, this method will also find layers matching by name only. "
+    "For example:\n"
+    "\n"
+    "@code\n"
+    "# finds layer '17/0' and 'name (17/0)':\n"
+    "index = layout.find_layer(RBA::LayerInfo::new(17, 0))\n"
+    "# finds layer 'name' (first priority), but also 'name (17/0)' (second priority):\n"
+    "index = layout.find_layer(RBA::LayerInfo::new('name'))\n"
+    "# note that this will not match layer 'name (17/0)' and create a new name-only layer:\n"
+    "index = layout.layer(RBA::LayerInfo::new('name'))\n"
+    "@/code\n"
+    "\n"
+    "This method has been introduced in version 0.23 and has been extended to name queries in version 0.28.11.\n"
   ) +
   gsi::method_ext ("find_layer", &find_layer1, gsi::arg ("name"),
     "@brief Finds a layer with the given name\n"
@@ -1595,7 +1627,17 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "If a layer with the given name already exists, this method will return the index of that layer."
     "If no such layer exists, it will return nil.\n"
     "\n"
-    "This method has been introduced in version 0.23.\n"
+    "In contrast to \\layer, this method will also find numbered layers if the name matches. "
+    "For example:\n"
+    "\n"
+    "@code\n"
+    "# finds layer 'name' (first priority), but also 'name (17/0)' (second priority):\n"
+    "index = layout.find_layer('name')\n"
+    "# note that this will not match layer 'name (17/0)' and create a new name-only layer:\n"
+    "index = layout.layer('name')\n"
+    "@/code\n"
+    "\n"
+    "This method has been introduced in version 0.23 and has been extended to name queries in version 0.28.11.\n"
   ) +
   gsi::method_ext ("find_layer", &find_layer2, gsi::arg ("layer"), gsi::arg ("datatype"),
     "@brief Finds a layer with the given layer and datatype number\n"
@@ -1641,11 +1683,12 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "\n"
     "See \\insert_special_layer for a description of special layers."
   ) +
-  gsi::method ("set_info", &db::Layout::set_properties, gsi::arg ("index"), gsi::arg ("props"),
+  gsi::method_ext ("set_info", &set_properties, gsi::arg ("index"), gsi::arg ("props"),
     "@brief Sets the info structure for a specified layer\n"
   ) +
-  gsi::method ("get_info", &db::Layout::get_properties, gsi::arg ("index"),
+  gsi::method_ext ("get_info", &get_properties, gsi::arg ("index"),
     "@brief Gets the info structure for a specified layer\n"
+    "If the layer index is not a valid layer index, an empty LayerProperties object will be returned."
   ) +
   gsi::method ("cells", &db::Layout::cells,
     "@brief Returns the number of cells\n"
@@ -1714,29 +1757,53 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "@param a The first of the layers to swap.\n"
     "@param b The second of the layers to swap.\n"
   ) +
-  gsi::method ("move_layer", &db::Layout::move_layer, gsi::arg ("src"), gsi::arg ("dest"),
+  gsi::method ("move_layer", static_cast<void (db::Layout::*) (unsigned int, unsigned int)> (&db::Layout::move_layer), gsi::arg ("src"), gsi::arg ("dest"),
     "@brief Moves a layer\n"
     "\n"
-    "This method was introduced in version 0.19.\n"
-    "\n"
-    "Move a layer from the source to the target. The target is not cleared before, so that this method \n"
-    "merges shapes from the source with the target layer. The source layer is empty after that operation.\n"
+    "Moves a layer from the source to the destination layer. The target is not cleared before, so that this method \n"
+    "merges shapes from the source with the destination layer. The source layer is empty after that operation.\n"
     "\n"
     "@param src The layer index of the source layer.\n"
     "@param dest The layer index of the destination layer.\n"
+    "\n"
+    "This method was introduced in version 0.19.\n"
   ) +
-  gsi::method ("copy_layer", &db::Layout::copy_layer, gsi::arg ("src"), gsi::arg ("dest"),
+  gsi::method ("move_layer", static_cast<void (db::Layout::*) (unsigned int, unsigned int, unsigned int)> (&db::Layout::move_layer), gsi::arg ("src"), gsi::arg ("dest"), gsi::arg ("flags"),
+    "@brief Moves a layer (selected shape types only)\n"
+    "\n"
+    "Moves a layer from the source to the destination layer. The target is not cleared before, so that this method \n"
+    "merges shapes from the source with the destination layer. The copied shapes are removed from the source layer.\n"
+    "\n"
+    "@param src The layer index of the source layer.\n"
+    "@param dest The layer index of the destination layer.\n"
+    "@param flags A combination of the shape type flags from \\Shapes, S... constants\n"
+    "\n"
+    "This method variant has been introduced in version 0.28.9.\n"
+  ) +
+  gsi::method ("copy_layer", static_cast<void (db::Layout::*) (unsigned int, unsigned int)> (&db::Layout::copy_layer), gsi::arg ("src"), gsi::arg ("dest"),
     "@brief Copies a layer\n"
     "\n"
-    "This method was introduced in version 0.19.\n"
-    "\n"
-    "Copy a layer from the source to the target. The target is not cleared before, so that this method \n"
-    "merges shapes from the source with the target layer.\n"
+    "Copies a layer from the source to the destination layer. The destination layer is not cleared before, so that this method \n"
+    "merges shapes from the source with the destination layer.\n"
     "\n"
     "@param src The layer index of the source layer.\n"
     "@param dest The layer index of the destination layer.\n"
+    "\n"
+    "This method was introduced in version 0.19.\n"
   ) +
-  gsi::method ("clear_layer", &db::Layout::clear_layer, gsi::arg ("layer_index"),
+  gsi::method ("copy_layer", static_cast<void (db::Layout::*) (unsigned int, unsigned int, unsigned int)> (&db::Layout::copy_layer), gsi::arg ("src"), gsi::arg ("dest"), gsi::arg ("flags"),
+    "@brief Copies a layer (selected shape types only)\n"
+    "\n"
+    "Copies a layer from the source to the destination layer. The destination layer is not cleared before, so that this method \n"
+    "merges shapes from the source with the destination layer.\n"
+    "\n"
+    "@param src The layer index of the source layer.\n"
+    "@param dest The layer index of the destination layer.\n"
+    "@param flags A combination of the shape type flags from \\Shapes, S... constants\n"
+    "\n"
+    "This method variant has been introduced in version 0.28.9.\n"
+  ) +
+  gsi::method ("clear_layer", static_cast<void (db::Layout::*) (unsigned int)> (&db::Layout::clear_layer), gsi::arg ("layer_index"),
     "@brief Clears a layer\n"
     "\n"
     "Clears the layer: removes all shapes.\n"
@@ -1744,6 +1811,16 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "This method was introduced in version 0.19.\n"
     "\n"
     "@param layer_index The index of the layer to delete.\n"
+  ) +                               
+  gsi::method ("clear_layer", static_cast<void (db::Layout::*) (unsigned int, unsigned int)> (&db::Layout::clear_layer), gsi::arg ("layer_index"), gsi::arg ("flags"),
+    "@brief Clears a layer (given shape types only)\n"
+    "\n"
+    "Clears the layer: removes all shapes for the given shape types.\n"
+    "\n"
+    "This method was introduced in version 0.28.9.\n"
+    "\n"
+    "@param layer_index The index of the layer to delete.\n"
+    "@param flags The type selector for the shapes to delete (see \\Shapes class, S... constants).\n"
   ) +
   gsi::method ("delete_layer", &db::Layout::delete_layer, gsi::arg ("layer_index"),
     "@brief Deletes a layer\n"
@@ -1753,7 +1830,7 @@ Class<db::Layout> decl_Layout ("db", "Layout",
     "\n"
     "@param layer_index The index of the layer to delete.\n"
   ) +
-  gsi::method_ext ("layer_indexes|#layer_indices", &layer_indices,
+  gsi::method_ext ("layer_indexes|#layer_indices", &layer_indexes,
     "@brief Gets a list of valid layer's indices\n"
     "This method returns an array with layer indices representing valid layers.\n"
     "\n"

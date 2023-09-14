@@ -440,7 +440,7 @@ LayoutViewFunctions::cm_cell_user_properties ()
     db::properties_id_type prop_id = cell.prop_id ();
 
     lay::UserPropertiesForm props_form (parent_widget ());
-    if (props_form.show (view (), cv_index, prop_id)) {
+    if (props_form.show (view (), cv_index, prop_id, layout.begin_meta (cell.cell_index ()), layout.end_meta (cell.cell_index ()))) {
 
       view ()->transaction (tl::to_string (tr ("Edit cell's user properties")));
       cell.prop_id (prop_id);
@@ -735,7 +735,7 @@ void
 LayoutViewFunctions::cm_cell_cut ()
 {
   if (view ()->hierarchy_panel ()) {
-    //  TODO: currently the hierarchy panel's cut function does it's own transaction handling.
+    //  TODO: currently the hierarchy panel's cut function does its own transaction handling.
     //  Otherwise the cut function is not working propertly.
     view ()->hierarchy_panel ()->cut ();
   }
@@ -1177,11 +1177,12 @@ LayoutViewFunctions::do_cm_duplicate (bool interactive)
   db::Clipboard::instance ().swap (saved_clipboard);
 
   try {
-    view ()->copy ();
+    bool transient_mode = ! view ()->has_selection ();
+    view ()->copy_view_objects ();
     view ()->clear_selection ();
     view ()->cancel ();
     if (interactive) {
-      view ()->paste_interactive ();
+      view ()->paste_interactive (transient_mode);
     } else {
       view ()->paste ();
     }
@@ -1873,12 +1874,12 @@ LayoutViewFunctions::cm_edit_layer ()
 {
   lay::LayerPropertiesConstIterator sel = view ()->current_layer ();
   if (sel.is_null ()) {
-    throw tl::Exception (tl::to_string (tr ("No layer selected for editing it's properties")));
+    throw tl::Exception (tl::to_string (tr ("No layer selected for editing its properties")));
   }
 
   int index = sel->cellview_index ();
   if (sel->has_children () || index < 0 || int (view ()->cellviews ()) <= index || sel->layer_index () < 0) {
-    throw tl::Exception (tl::to_string (tr ("No valid layer selected for editing it's properties")));
+    throw tl::Exception (tl::to_string (tr ("No valid layer selected for editing its properties")));
   }
 
   const lay::CellView &cv = view ()->cellview (index);

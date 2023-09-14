@@ -666,15 +666,15 @@ TextInputStream::reset ()
 InputFile::InputFile (const std::string &path)
   : m_fd (-1)
 {
-  m_source = path;
+  m_source = tl::absolute_file_path (path);;
 #if defined(_WIN32)
-  int fd = _wopen (tl::to_wstring (path).c_str (), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL);
+  int fd = _wopen (tl::to_wstring (m_source).c_str (), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL);
   if (fd < 0) {
     throw FileOpenErrorException (m_source, errno);
   }
   m_fd = fd;
 #else
-  int fd = open (path.c_str (), O_RDONLY);
+  int fd = open (m_source.c_str (), O_RDONLY);
   if (fd < 0) {
     throw FileOpenErrorException (m_source, errno);
   }
@@ -747,15 +747,15 @@ InputFile::filename () const
 InputZLibFile::InputZLibFile (const std::string &path)
   : mp_d (new ZLibFilePrivate ())
 {
-  m_source = path;
+  m_source = tl::absolute_file_path (path);
 #if defined(_WIN32)
-  int fd = _wopen (tl::to_wstring (path).c_str (), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL);
+  int fd = _wopen (tl::to_wstring (m_source).c_str (), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL);
   if (fd < 0) {
     throw FileOpenErrorException (m_source, errno);
   }
   mp_d->zs = gzdopen (fd, "rb");
 #else
-  mp_d->zs = gzopen (tl::string_to_system (path).c_str (), "rb");
+  mp_d->zs = gzopen (tl::string_to_system (m_source).c_str (), "rb");
 #endif
   if (mp_d->zs == NULL) {
     throw FileOpenErrorException (m_source, errno);
@@ -1034,11 +1034,11 @@ OutputStream::seek (size_t pos)
 // ---------------------------------------------------------------
 //  OutputFileBase implementation
 
-OutputFileBase::OutputFileBase (const std::string &path, int keep_backups)
-  : m_keep_backups (keep_backups), m_path (path), m_has_error (false)
+OutputFileBase::OutputFileBase (const std::string &p, int keep_backups)
+  : m_keep_backups (keep_backups), m_path (tl::absolute_file_path (p)), m_has_error (false)
 {
-  if (tl::file_exists (path)) {
-    m_backup_path = path + ".~backup";
+  if (tl::file_exists (m_path)) {
+    m_backup_path = m_path + ".~backup";
     if (tl::file_exists (m_backup_path)) {
       if (! tl::rm_file (m_backup_path)) {
         tl::warn << tl::sprintf (tl::to_string (tr ("Could not create backup file: unable to remove existing file '%s'")), m_backup_path);
@@ -1046,8 +1046,8 @@ OutputFileBase::OutputFileBase (const std::string &path, int keep_backups)
       }
     }
     if (! m_backup_path.empty ()) {
-      if (! tl::rename_file (path, tl::filename (m_backup_path))) {
-        tl::warn << tl::sprintf (tl::to_string (tr ("Could not create backup file: unable to rename original file '%s' to backup file")), path, m_backup_path);
+      if (! tl::rename_file (m_path, tl::filename (m_backup_path))) {
+        tl::warn << tl::sprintf (tl::to_string (tr ("Could not create backup file: unable to rename original file '%s' to backup file")), m_path, m_backup_path);
         m_backup_path = std::string ();
       }
     }
@@ -1133,20 +1133,19 @@ void OutputFileBase::reject ()
 // ---------------------------------------------------------------
 //  OutputFile implementation
 
-OutputFile::OutputFile (const std::string &path, int keep_backups)
-  : OutputFileBase (path, keep_backups), m_fd (-1)
+OutputFile::OutputFile (const std::string &p, int keep_backups)
+  : OutputFileBase (p, keep_backups), m_fd (-1)
 {
-  m_source = path;
 #if defined(_WIN32)
-  int fd = _wopen (tl::to_wstring (path).c_str (), _O_CREAT | _O_TRUNC | _O_BINARY | _O_WRONLY | _O_SEQUENTIAL, _S_IREAD | _S_IWRITE );
+  int fd = _wopen (tl::to_wstring (path ()).c_str (), _O_CREAT | _O_TRUNC | _O_BINARY | _O_WRONLY | _O_SEQUENTIAL, _S_IREAD | _S_IWRITE );
   if (fd < 0) {
-    throw FileOpenErrorException (m_source, errno);
+    throw FileOpenErrorException (path (), errno);
   }
   m_fd = fd;
 #else
-  int fd = open (path.c_str (), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  int fd = open (path ().c_str (), O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0) {
-    throw FileOpenErrorException (m_source, errno);
+    throw FileOpenErrorException (path (), errno);
   }
   m_fd = fd;
 #endif
@@ -1187,28 +1186,27 @@ OutputFile::write_file (const char *b, size_t n)
   ptrdiff_t ret = ::write (m_fd, b, (unsigned int) n);
 #endif
   if (ret < 0) {
-    throw FileWriteErrorException (m_source, errno);
+    throw FileWriteErrorException (path (), errno);
   }
 }
 
 // ---------------------------------------------------------------
 //  OutputZLibFile implementation
 
-OutputZLibFile::OutputZLibFile (const std::string &path, int keep_backups)
-  : OutputFileBase (path, keep_backups), mp_d (new ZLibFilePrivate ())
+OutputZLibFile::OutputZLibFile (const std::string &p, int keep_backups)
+  : OutputFileBase (p, keep_backups), mp_d (new ZLibFilePrivate ())
 {
-  m_source = path;
 #if defined(_WIN32)
-  FILE *file = _wfopen (tl::to_wstring (path).c_str (), L"wb");
+  FILE *file = _wfopen (tl::to_wstring (path ()).c_str (), L"wb");
   if (file == NULL) {
-    throw FileOpenErrorException (m_source, errno);
+    throw FileOpenErrorException (path (), errno);
   }
   mp_d->zs = gzdopen (_fileno (file), "wb");
 #else
-  mp_d->zs = gzopen (tl::string_to_system (path).c_str (), "wb");
+  mp_d->zs = gzopen (tl::string_to_system (path ()).c_str (), "wb");
 #endif
   if (mp_d->zs == NULL) {
-    throw FileOpenErrorException (m_source, errno);
+    throw FileOpenErrorException (path (), errno);
   }
 }
 
@@ -1231,9 +1229,9 @@ OutputZLibFile::write_file (const char *b, size_t n)
     int gz_err = 0;
     const char *em = gzerror (mp_d->zs, &gz_err);
     if (gz_err == Z_ERRNO) {
-      throw FileWriteErrorException (m_source, errno);
+      throw FileWriteErrorException (path (), errno);
     } else {
-      throw ZLibWriteErrorException (m_source, em);
+      throw ZLibWriteErrorException (path (), em);
     }
   }
 }

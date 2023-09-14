@@ -1102,7 +1102,7 @@ class DBShapes_TestClass < TestBase
 
     arr = []
     shapes.each( RBA::Shapes::SAll ) { |s| arr.push( s.to_s ) } 
-    assert_equal( arr, ["edge (1,2;3,4)", "text ('text',r0 100,200)", "text ('blabla',m0 100,200) prop_id=1"] )
+    assert_equal( arr, ["edge (1,2;3,4)", "text ('text',r0 100,200)", "text ('blabla',m0 100,200) f=3 ha=c va=b prop_id=1"] )
 
     assert_equal( s1.is_valid?, true )
     assert_equal( s1.shapes.is_valid?(s1), true )
@@ -1316,7 +1316,7 @@ class DBShapes_TestClass < TestBase
 
     arr = []
     shapes.each( RBA::Shapes::SAll ) { |s| arr.push( s.to_s ) } 
-    assert_equal( arr, ["edge (1,2;3,4)", "text ('text',r0 100,200)", "text ('blabla',m0 100,200) prop_id=1"] )
+    assert_equal( arr, ["edge (1,2;3,4)", "text ('text',r0 100,200)", "text ('blabla',m0 100,200) f=3 ha=c va=b prop_id=1"] )
 
     assert_equal( s1.is_valid?, true )
     assert_equal( s1.shapes.is_valid?(s1), true )
@@ -1592,6 +1592,34 @@ class DBShapes_TestClass < TestBase
     assert_equal(ly.top_cell.shapes(ly.layer(1, 0)).size, 200)
     ly.top_cell.shapes(ly.layer(1, 0)).insert(RBA::Polygon::new(RBA::Box::new(0, 0, 100, 100)))
     assert_equal(ly.top_cell.shapes(ly.layer(1, 0)).size, 201)
+
+  end
+
+  # Shapes with shape-type specific insert and clear
+  def test_11
+
+    s = RBA::Shapes::new
+    s.insert(RBA::Box::new(1, 2, 3, 4))
+    s.insert(RBA::Polygon::new(RBA::Box::new(1, 2, 3, 4)))
+
+    assert_equal(s.each.collect { |sh| sh.to_s }.join("; "), "polygon (1,2;1,4;3,4;3,2); box (1,2;3,4)")
+
+    s2 = RBA::Shapes::new
+    s2.insert(s)
+
+    assert_equal(s2.each.collect { |sh| sh.to_s }.join("; "), "polygon (1,2;1,4;3,4;3,2); box (1,2;3,4)")
+
+    s2.clear(RBA::Shapes::SPolygons)
+
+    assert_equal(s2.each.collect { |sh| sh.to_s }.join("; "), "box (1,2;3,4)")
+
+    s2.clear
+    
+    assert_equal(s2.each.collect { |sh| sh.to_s }.join("; "), "")
+
+    s2.insert(s, RBA::Shapes::SPolygons)
+
+    assert_equal(s2.each.collect { |sh| sh.to_s }.join("; "), "polygon (1,2;1,4;3,4;3,2)")
 
   end
 

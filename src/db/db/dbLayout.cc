@@ -258,12 +258,12 @@ private:
 // -----------------------------------------------------------------
 //  Implementation of the ProxyContextInfo class
 
-ProxyContextInfo
-ProxyContextInfo::deserialize (std::vector<std::string>::const_iterator from, std::vector<std::string>::const_iterator to)
+LayoutOrCellContextInfo
+LayoutOrCellContextInfo::deserialize (std::vector<std::string>::const_iterator from, std::vector<std::string>::const_iterator to)
 {
-  ProxyContextInfo info;
+  LayoutOrCellContextInfo info;
 
-  for (std::vector<std::string>::const_iterator i = from; i != to; ++i) {
+  for (auto i = from; i != to; ++i) {
 
     tl::Extractor ex (i->c_str ());
 
@@ -290,6 +290,20 @@ ProxyContextInfo::deserialize (std::vector<std::string>::const_iterator from, st
 
       info.cell_name = ex.skip ();
 
+    } else if (ex.test ("META(")) {
+
+      std::pair<std::string, std::pair<tl::Variant, std::string> > vv;
+
+      ex.read_word_or_quoted (vv.first);
+      if (ex.test (",")) {
+        ex.read_word_or_quoted (vv.second.second);
+      }
+      ex.test (")");
+      ex.test ("=");
+      ex.read (vv.second.first);
+
+      info.meta_info.insert(vv);
+
     }
 
   }
@@ -298,12 +312,12 @@ ProxyContextInfo::deserialize (std::vector<std::string>::const_iterator from, st
 }
 
 void
-ProxyContextInfo::serialize (std::vector<std::string> &strings)
+LayoutOrCellContextInfo::serialize (std::vector<std::string> &strings)
 {
   if (! lib_name.empty ()) {
     strings.push_back ("LIB=" + lib_name);
   }
-  for (std::map<std::string, tl::Variant> ::const_iterator p = pcell_parameters.begin (); p != pcell_parameters.end (); ++p) {
+  for (auto p = pcell_parameters.begin (); p != pcell_parameters.end (); ++p) {
     strings.push_back ("P(" + tl::to_word_or_quoted_string (p->first) + ")=" + p->second.to_parsable_string ());
   }
   if (! pcell_name.empty ()) {
@@ -312,6 +326,32 @@ ProxyContextInfo::serialize (std::vector<std::string> &strings)
   if (! cell_name.empty ()) {
     strings.push_back ("CELL=" + cell_name);
   }
+
+  std::string mv;
+  for (auto m = meta_info.begin (); m != meta_info.end (); ++m) {
+    mv.clear ();
+    mv += "META(";
+    mv += tl::to_word_or_quoted_string (m->first);
+    if (! m->second.second.empty ()) {
+      mv += ",";
+      mv += tl::to_word_or_quoted_string (m->second.second);
+    }
+    mv += ")=";
+    mv += m->second.first.to_parsable_string ();
+    strings.push_back (mv);
+  }
+}
+
+bool
+LayoutOrCellContextInfo::has_proxy_info () const
+{
+  return !pcell_name.empty () || !lib_name.empty ();
+}
+
+bool
+LayoutOrCellContextInfo::has_meta_info () const
+{
+  return !meta_info.empty ();
 }
 
 // -----------------------------------------------------------------
@@ -481,7 +521,13 @@ Layout::operator= (const Layout &d)
     }
 
     m_dbu = d.m_dbu;
+
     m_meta_info = d.m_meta_info;
+    m_meta_info_by_cell = d.m_meta_info_by_cell;
+    m_meta_info_names = d.m_meta_info_names;
+    m_meta_info_name_map = d.m_meta_info_name_map;
+
+    m_tech_name = d.m_tech_name;
 
   }
   return *this;
@@ -593,7 +639,7 @@ Layout::set_technology_name (const std::string &tech)
       if (! pn.first) {
 
         //  substitute by a cold proxy
-        db::ProxyContextInfo info;
+        db::LayoutOrCellContextInfo info;
         get_context_info (ci, info);
         create_cold_proxy_as (info, ci);
 
@@ -606,7 +652,7 @@ Layout::set_technology_name (const std::string &tech)
         if (! old_pcell_decl || ! new_pcell_decl) {
 
           //  substitute by a cold proxy
-          db::ProxyContextInfo info;
+          db::LayoutOrCellContextInfo info;
           get_context_info (ci, info);
           create_cold_proxy_as (info, ci);
 
@@ -633,7 +679,7 @@ Layout::set_technology_name (const std::string &tech)
       if (! cn.first) {
 
         //  unlink this proxy: substitute by a cold proxy
-        db::ProxyContextInfo info;
+        db::LayoutOrCellContextInfo info;
         get_context_info (ci, info);
         create_cold_proxy_as (info, ci);
 
@@ -650,7 +696,7 @@ Layout::set_technology_name (const std::string &tech)
       db::cell_index_type ci = (*lp)->Cell::cell_index ();
 
       //  substitute by a cold proxy
-      db::ProxyContextInfo info;
+      db::LayoutOrCellContextInfo info;
       get_context_info (ci, info);
       create_cold_proxy_as (info, ci);
 
@@ -1051,15 +1097,17 @@ Layout::do_prune_cell_or_subcell (cell_index_type id, int levels, bool subcells)
   //  collect the called cells
   std::set <cell_index_type> called;
   cref.collect_called_cells (called, levels);
-  called.insert (id);
+  if (! subcells) {
+    called.insert (id);
+  }
 
   //  From these cells erase all cells that have parents outside the subtree of our cell.
   //  Make sure this is done recursively by doing this top-down.
   for (top_down_iterator c = begin_top_down (); c != end_top_down (); ++c) {
-    if (called.find (*c) != called.end () && *c != id) {
+    if (*c != id && called.find (*c) != called.end ()) {
       db::Cell &ccref = cell (*c);
       for (db::Cell::parent_cell_iterator pc = ccref.begin_parent_cells (); pc != ccref.end_parent_cells (); ++pc) {
-        if (called.find (*pc) == called.end ()) {
+        if (*pc != id && called.find (*pc) == called.end ()) {
           //  we have a parent outside the subset considered currently (either the cell was never in or
           //  it was removed itself already): remove this cell from the set of valid subcells.
           called.erase (*c);
@@ -1069,17 +1117,8 @@ Layout::do_prune_cell_or_subcell (cell_index_type id, int levels, bool subcells)
     }
   }
 
-  //  order the called cells bottom-up 
-  std::vector <cell_index_type> cells_to_delete;
-  cells_to_delete.reserve (called.size ());
-  for (bottom_up_iterator c = begin_bottom_up (); c != end_bottom_up (); ++c) {
-    if (called.find (*c) != called.end () && (!subcells || *c != id)) {
-      cells_to_delete.push_back (*c);
-    }
-  }
-
-  //  and delete these cells
-  delete_cells (cells_to_delete.begin (), cells_to_delete.end ());
+  //  and delete the cells
+  delete_cells (called);
 
   //  erase all instances in the subcells case (because, by definition we don't have any more instances)
   if (subcells) {
@@ -1204,6 +1243,11 @@ Layout::take_cell (cell_index_type ci)
 
   m_cell_ptrs [ci] = 0;
 
+  auto mi = m_meta_info_by_cell.find (ci);
+  if (mi != m_meta_info_by_cell.end ()) {
+    m_meta_info_by_cell.erase (mi);
+  }
+
   //  Using free cell indices does have one significant drawback:
   //  The cellview references cannot be uniquely classified as being invalid - because the
   //  ID might be reused. This causes problems, when a cell is being deleted and subsequently a
@@ -1252,7 +1296,24 @@ Layout::uniquify_cell_name (const char *name) const
   }
 }
 
-cell_index_type 
+cell_index_type
+Layout::add_cell (const db::Layout &other, db::cell_index_type ci)
+{
+  cell_index_type ci_new = add_cell (other.cell_name (ci));
+  cell (ci_new).set_ghost_cell (other.cell (ci).is_ghost_cell ());
+
+  if (&other == this) {
+    add_meta_info (ci_new, other.begin_meta (ci), other.end_meta (ci));
+  } else {
+    for (auto m = other.begin_meta (ci); m != other.end_meta (ci); ++m) {
+      add_meta_info (ci_new, meta_info_name_id (other.meta_info_name (m->first)), m->second);
+    }
+  }
+
+  return ci_new;
+}
+
+cell_index_type
 Layout::add_cell (const char *name)
 {
   std::string b;
@@ -1290,7 +1351,7 @@ Layout::add_cell (const char *name)
   m_cells.push_back_ptr (new_cell);
   m_cell_ptrs [new_index] = new_cell;
 
-  //  enter it's index and cell_name
+  //  enter its index and cell_name
   register_cell_name (name, new_index);
 
   if (manager () && manager ()->transacting ()) {
@@ -1312,7 +1373,7 @@ Layout::add_anonymous_cell ()
   m_cells.push_back_ptr (new_cell);
   m_cell_ptrs [new_index] = new_cell;
 
-  //  enter it's index and cell_name
+  //  enter its index and cell_name
   register_cell_name (0, new_index);
 
   if (manager () && manager ()->transacting ()) {
@@ -1325,7 +1386,7 @@ Layout::add_anonymous_cell ()
 void 
 Layout::register_cell_name (const char *name, cell_index_type ci)
 {
-  //  enter it's index and cell_name
+  //  enter its index and cell_name
   char *cp;
 
   if (name == 0) {
@@ -1731,8 +1792,9 @@ Layout::do_update ()
       for (bottom_up_iterator c = begin_bottom_up (); c != end_bottom_up (); ++c) {
         ++*pr;
         cell_type &cp (cell (*c));
-        if (hier_dirty () || dirty_parents.find (*c) != dirty_parents.end ()) {
-          cp.sort_inst_tree ();
+        bool force_sort_inst_tree = dirty_parents.find (*c) != dirty_parents.end ();
+        if (hier_dirty () || force_sort_inst_tree) {
+          cp.sort_inst_tree (force_sort_inst_tree);
         }
         if (cp.layers () > layers) {
           layers = cp.layers ();
@@ -1748,6 +1810,58 @@ Layout::do_update ()
   delete pr;
 }
 
+static Layout::meta_info_map s_empty_meta;
+
+Layout::meta_info_iterator
+Layout::begin_meta (db::cell_index_type ci) const
+{
+  auto m = m_meta_info_by_cell.find (ci);
+  if (m != m_meta_info_by_cell.end ()) {
+    return m->second.begin ();
+  } else {
+    return s_empty_meta.begin ();
+  }
+}
+
+Layout::meta_info_iterator
+Layout::end_meta (db::cell_index_type ci) const
+{
+  auto m = m_meta_info_by_cell.find (ci);
+  if (m != m_meta_info_by_cell.end ()) {
+    return m->second.end ();
+  } else {
+    return s_empty_meta.end ();
+  }
+}
+
+const std::string &
+Layout::meta_info_name (Layout::meta_info_name_id_type name_id) const
+{
+  static std::string empty;
+  return name_id < m_meta_info_names.size () ? m_meta_info_names[name_id] : empty;
+}
+
+Layout::meta_info_name_id_type
+Layout::meta_info_name_id (const std::string &name)
+{
+  auto n = m_meta_info_name_map.find (name);
+  if (n != m_meta_info_name_map.end ()) {
+    return n->second;
+  } else {
+    size_t id = m_meta_info_names.size ();
+    m_meta_info_names.push_back (name);
+    m_meta_info_name_map.insert (std::make_pair (name, id));
+    return id;
+  }
+}
+
+Layout::meta_info_name_id_type
+Layout::meta_info_name_id (const std::string &name) const
+{
+  auto n = m_meta_info_name_map.find (name);
+  return n != m_meta_info_name_map.end () ? n->second : std::numeric_limits<meta_info_name_id_type>::max ();
+}
+
 void
 Layout::clear_meta ()
 {
@@ -1755,42 +1869,79 @@ Layout::clear_meta ()
 }
 
 void
-Layout::add_meta_info (const MetaInfo &i)
+Layout::add_meta_info (meta_info_name_id_type name_id, const MetaInfo &i)
 {
-  for (meta_info::iterator m = m_meta_info.begin (); m != m_meta_info.end (); ++m) {
-    if (m->name == i.name) {
-      *m = i;
-      return;
-    }
-  }
-  m_meta_info.push_back (i);
+  m_meta_info[name_id] = i;
 }
 
 void
-Layout::remove_meta_info (const std::string &name)
+Layout::remove_meta_info (meta_info_name_id_type name_id)
 {
-  for (meta_info::iterator m = m_meta_info.begin (); m != m_meta_info.end (); ++m) {
-    if (m->name == name) {
-      m_meta_info.erase (m);
-      return;
-    }
+  m_meta_info.erase (name_id);
+}
+
+const MetaInfo &
+Layout::meta_info (meta_info_name_id_type name_id) const
+{
+  auto n = m_meta_info.find (name_id);
+  static MetaInfo null_value;
+  return n != m_meta_info.end () ? n->second : null_value;
+}
+
+bool
+Layout::has_meta_info (meta_info_name_id_type name_id) const
+{
+  return m_meta_info.find (name_id) != m_meta_info.end ();
+}
+
+void
+Layout::clear_meta (db::cell_index_type ci)
+{
+  m_meta_info_by_cell.erase (ci);
+}
+
+void
+Layout::add_meta_info (db::cell_index_type ci, meta_info_name_id_type name_id, const MetaInfo &i)
+{
+  m_meta_info_by_cell[ci][name_id] = i;
+}
+
+void
+Layout::remove_meta_info (db::cell_index_type ci, meta_info_name_id_type name_id)
+{
+  auto c = m_meta_info_by_cell.find (ci);
+  if (c != m_meta_info_by_cell.end ()) {
+    c->second.erase (name_id);
   }
 }
 
-const std::string &
-Layout::meta_info_value (const std::string &name) const
+const MetaInfo &
+Layout::meta_info (db::cell_index_type ci, meta_info_name_id_type name_id) const
 {
-  for (meta_info::const_iterator m = m_meta_info.begin (); m != m_meta_info.end (); ++m) {
-    if (m->name == name) {
-      return m->value;
+  auto c = m_meta_info_by_cell.find (ci);
+  if (c != m_meta_info_by_cell.end ()) {
+    auto i = c->second.find (name_id);
+    if (i != c->second.end ()) {
+      return i->second;
     }
   }
 
-  static const std::string s_empty;
-  return s_empty;
+  static MetaInfo null_value;
+  return null_value;
 }
 
-void 
+bool
+Layout::has_meta_info (db::cell_index_type ci, meta_info_name_id_type name_id) const
+{
+  auto c = m_meta_info_by_cell.find (ci);
+  if (c != m_meta_info_by_cell.end ()) {
+    return c->second.find (name_id) != c->second.end ();
+  } else {
+    return false;
+  }
+}
+
+void
 Layout::swap_layers (unsigned int a, unsigned int b)
 {
   tl_assert (m_layers.layer_state (a) != LayoutLayers::Free);
@@ -1814,7 +1965,19 @@ Layout::move_layer (unsigned int src, unsigned int dest)
   }
 }
 
-void 
+void
+Layout::move_layer (unsigned int src, unsigned int dest, unsigned int flags)
+{
+  tl_assert (m_layers.layer_state (src) != LayoutLayers::Free);
+  tl_assert (m_layers.layer_state (dest) != LayoutLayers::Free);
+
+  //  move the shapes
+  for (iterator c = begin (); c != end (); ++c) {
+    c->move (src, dest, flags);
+  }
+}
+
+void
 Layout::copy_layer (unsigned int src, unsigned int dest)
 {
   tl_assert (m_layers.layer_state (src) != LayoutLayers::Free);
@@ -1826,7 +1989,19 @@ Layout::copy_layer (unsigned int src, unsigned int dest)
   }
 }
 
-void 
+void
+Layout::copy_layer (unsigned int src, unsigned int dest, unsigned int flags)
+{
+  tl_assert (m_layers.layer_state (src) != LayoutLayers::Free);
+  tl_assert (m_layers.layer_state (dest) != LayoutLayers::Free);
+
+  //  copy the shapes
+  for (iterator c = begin (); c != end (); ++c) {
+    c->copy (src, dest, flags);
+  }
+}
+
+void
 Layout::clear_layer (unsigned int n)
 {
   tl_assert (m_layers.layer_state (n) != LayoutLayers::Free);
@@ -1837,7 +2012,18 @@ Layout::clear_layer (unsigned int n)
   }
 }
 
-void 
+void
+Layout::clear_layer (unsigned int n, unsigned int flags)
+{
+  tl_assert (m_layers.layer_state (n) != LayoutLayers::Free);
+
+  //  clear the shapes
+  for (iterator c = begin (); c != end (); ++c) {
+    c->clear (n, flags);
+  }
+}
+
+void
 Layout::delete_layer (unsigned int n)
 {
   tl_assert (m_layers.layer_state (n) != LayoutLayers::Free);
@@ -2062,7 +2248,7 @@ Layout::get_pcell_variant_dict (pcell_id_type pcell_id, const std::map<std::stri
     m_cells.push_back_ptr (variant);
     m_cell_ptrs [new_index] = variant;
 
-    //  enter it's index and cell_name
+    //  enter its index and cell_name
     register_cell_name (b.c_str (), new_index);
 
     if (manager () && manager ()->transacting ()) {
@@ -2101,7 +2287,7 @@ Layout::get_pcell_variant (pcell_id_type pcell_id, const std::vector<tl::Variant
     m_cells.push_back_ptr (variant);
     m_cell_ptrs [new_index] = variant;
 
-    //  enter it's index and cell_name
+    //  enter its index and cell_name
     register_cell_name (b.c_str (), new_index);
 
     if (manager () && manager ()->transacting ()) {
@@ -2370,9 +2556,84 @@ Layout::get_pcell_variant_cell (cell_index_type cell_index, const std::vector<tl
 }
 
 bool
+Layout::has_context_info () const
+{
+  for (auto i = m_meta_info.begin (); i != m_meta_info.end (); ++i) {
+    if (i->second.persisted) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool
+Layout::has_context_info (cell_index_type cell_index) const
+{
+  auto c = m_meta_info_by_cell.find (cell_index);
+  if (c != m_meta_info_by_cell.end ()) {
+    for (auto i = c->second.begin (); i != c->second.end (); ++i) {
+      if (i->second.persisted) {
+        return true;
+      }
+    }
+  }
+
+  const db::Cell &cref = cell (cell_index);
+  if (cref.is_proxy () && ! cref.is_top ()) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool
+Layout::get_context_info (std::vector <std::string> &strings) const
+{
+  LayoutOrCellContextInfo info;
+  if (! get_context_info (info)) {
+    return false;
+  } else {
+    info.serialize (strings);
+    return true;
+  }
+}
+
+bool
+Layout::get_context_info (LayoutOrCellContextInfo &info) const
+{
+  for (auto i = m_meta_info.begin (); i != m_meta_info.end (); ++i) {
+    if (i->second.persisted) {
+      std::pair<tl::Variant, std::string> &mi = info.meta_info [m_meta_info_names [i->first] ];
+      mi.first = i->second.value;
+      mi.second = i->second.description;
+    }
+  }
+
+  return true;
+}
+
+void
+Layout::fill_meta_info_from_context (std::vector <std::string>::const_iterator from, std::vector <std::string>::const_iterator to)
+{
+  fill_meta_info_from_context (LayoutOrCellContextInfo::deserialize (from, to));
+}
+
+void
+Layout::fill_meta_info_from_context (const LayoutOrCellContextInfo &context_info)
+{
+  if (! context_info.meta_info.empty ()) {
+    for (auto i = context_info.meta_info.begin (); i != context_info.meta_info.end (); ++i) {
+      meta_info_name_id_type name_id = meta_info_name_id (i->first);
+      m_meta_info [name_id] = MetaInfo (i->second.second, i->second.first, true);
+    }
+  }
+}
+
+bool
 Layout::get_context_info (cell_index_type cell_index, std::vector <std::string> &strings) const
 {
-  ProxyContextInfo info;
+  LayoutOrCellContextInfo info;
   if (! get_context_info (cell_index, info)) {
     return false;
   } else {
@@ -2382,8 +2643,22 @@ Layout::get_context_info (cell_index_type cell_index, std::vector <std::string> 
 }
 
 bool
-Layout::get_context_info (cell_index_type cell_index, ProxyContextInfo &info) const
+Layout::get_context_info (cell_index_type cell_index, LayoutOrCellContextInfo &info) const
 {
+  bool any_meta = false;
+
+  auto cmi = m_meta_info_by_cell.find (cell_index);
+  if (cmi != m_meta_info_by_cell.end ()) {
+    for (auto i = cmi->second.begin (); i != cmi->second.end (); ++i) {
+      if (i->second.persisted) {
+        std::pair<tl::Variant, std::string> &mi = info.meta_info [m_meta_info_names [i->first] ];
+        mi.first = i->second.value;
+        mi.second = i->second.description;
+        any_meta = true;
+      }
+    }
+  }
+
   const db::Cell *cptr = &cell (cell_index);
 
   const db::ColdProxy *cold_proxy = dynamic_cast <const db::ColdProxy *> (cptr);
@@ -2399,7 +2674,7 @@ Layout::get_context_info (cell_index_type cell_index, ProxyContextInfo &info) co
 
     const db::Library *lib = db::LibraryManager::instance ().lib (lib_proxy->lib_id ());
     if (! lib) {
-      return false; //  abort
+      return any_meta; //  abort
     } else {
 
       //  one level of library indirection
@@ -2425,11 +2700,32 @@ Layout::get_context_info (cell_index_type cell_index, ProxyContextInfo &info) co
     const db::PCellHeader *header = ly->pcell_header (pcell_variant->pcell_id ());
     info.pcell_name = header->get_name ();
 
-  } else {
+  } else if (ly != this) {
     info.cell_name = ly->cell_name (cptr->cell_index ());
   }
 
   return true;
+}
+
+void
+Layout::fill_meta_info_from_context (cell_index_type cell_index, std::vector <std::string>::const_iterator from, std::vector <std::string>::const_iterator to)
+{
+  fill_meta_info_from_context (cell_index, LayoutOrCellContextInfo::deserialize (from, to));
+}
+
+void
+Layout::fill_meta_info_from_context (cell_index_type cell_index, const LayoutOrCellContextInfo &context_info)
+{
+  if (! context_info.meta_info.empty ()) {
+
+    meta_info_map &mi = m_meta_info_by_cell [cell_index];
+
+    for (auto i = context_info.meta_info.begin (); i != context_info.meta_info.end (); ++i) {
+      meta_info_name_id_type name_id = meta_info_name_id (i->first);
+      mi [name_id] = MetaInfo (i->second.second, i->second.first, true);
+    }
+
+  }
 }
 
 void
@@ -2463,11 +2759,11 @@ Layout::recover_proxy_as (cell_index_type cell_index, std::vector <std::string>:
     return false;
   }
 
-  return recover_proxy_as (cell_index, ProxyContextInfo::deserialize (from, to), layer_mapping);
+  return recover_proxy_as (cell_index, LayoutOrCellContextInfo::deserialize (from, to), layer_mapping);
 }
 
 bool
-Layout::recover_proxy_as (cell_index_type cell_index, const ProxyContextInfo &info, ImportLayerMapping *layer_mapping)
+Layout::recover_proxy_as (cell_index_type cell_index, const LayoutOrCellContextInfo &info, ImportLayerMapping *layer_mapping)
 {
   if (! info.lib_name.empty ()) {
 
@@ -2517,11 +2813,11 @@ Layout::recover_proxy (std::vector <std::string>::const_iterator from, std::vect
     return 0;
   }
 
-  return recover_proxy (ProxyContextInfo::deserialize (from, to));
+  return recover_proxy (LayoutOrCellContextInfo::deserialize (from, to));
 }
 
 db::Cell *
-Layout::recover_proxy (const ProxyContextInfo &info)
+Layout::recover_proxy (const LayoutOrCellContextInfo &info)
 {
   if (! info.lib_name.empty ()) {
 
@@ -2549,7 +2845,7 @@ Layout::recover_proxy (const ProxyContextInfo &info)
 }
 
 db::Cell *
-Layout::recover_proxy_no_lib (const ProxyContextInfo &info)
+Layout::recover_proxy_no_lib (const LayoutOrCellContextInfo &info)
 {
   if (! info.pcell_name.empty ()) {
 
@@ -2630,7 +2926,7 @@ Layout::get_lib_proxy (Library *lib, cell_index_type cell_index)
     m_cells.push_back_ptr (proxy);
     m_cell_ptrs [new_index] = proxy;
 
-    //  enter it's index and cell_name
+    //  enter its index and cell_name
     register_cell_name (b.c_str (), new_index);
 
     if (manager () && manager ()->transacting ()) {
@@ -2646,7 +2942,7 @@ Layout::get_lib_proxy (Library *lib, cell_index_type cell_index)
 }
 
 cell_index_type
-Layout::create_cold_proxy (const db::ProxyContextInfo &info)
+Layout::create_cold_proxy (const db::LayoutOrCellContextInfo &info)
 {
   //  create a new unique name
   std::string b;
@@ -2666,7 +2962,7 @@ Layout::create_cold_proxy (const db::ProxyContextInfo &info)
   m_cells.push_back_ptr (proxy);
   m_cell_ptrs [new_index] = proxy;
 
-  //  enter it's index and cell_name
+  //  enter its index and cell_name
   register_cell_name (b.c_str (), new_index);
 
   if (manager () && manager ()->transacting ()) {
@@ -2677,7 +2973,7 @@ Layout::create_cold_proxy (const db::ProxyContextInfo &info)
 }
 
 void
-Layout::create_cold_proxy_as (const db::ProxyContextInfo &info, cell_index_type target_cell_index)
+Layout::create_cold_proxy_as (const db::LayoutOrCellContextInfo &info, cell_index_type target_cell_index)
 {
   tl_assert (m_cell_ptrs [target_cell_index] != 0);
 

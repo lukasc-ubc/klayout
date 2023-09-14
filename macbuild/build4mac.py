@@ -47,7 +47,7 @@ def GenerateUsage(platform):
     usage  = "\n"
     usage += "---------------------------------------------------------------------------------------------------------\n"
     usage += "<< Usage of 'build4mac.py' >>\n"
-    usage += "       for building KLayout 0.28.4 or later on different Apple macOS / Mac OSX platforms.\n"
+    usage += "       for building KLayout 0.28.6 or later on different Apple macOS / Mac OSX platforms.\n"
     usage += "\n"
     usage += "$ [python] ./build4mac.py\n"
     usage += "   option & argument    : descriptions (refer to 'macbuild/build4mac_env.py' for details)| default value\n"
@@ -905,18 +905,30 @@ def Build_pymod(parameters):
     PymodDistDir = parameters['pymod_dist']
     # Using MacPorts
     if PymodDistDir[ModulePython] == 'dist-MP3':
+        addBinPath = "/opt/local/bin"
         addIncPath = "/opt/local/include"
         addLibPath = "/opt/local/lib"
     # Using Homebrew
     elif PymodDistDir[ModulePython] == 'dist-HB3':
-        addIncPath = "%s/include" % DefaultHomebrewRoot  # defined in "build4mac_env.py"
-        addLibPath = "%s/lib"     % DefaultHomebrewRoot  # defined in "build4mac_env.py"
+        addBinPath = "%s/bin"     % DefaultHomebrewRoot  # defined in "build4mac_env.py"
+        addIncPath = "%s/include" % DefaultHomebrewRoot  # -- ditto --
+        addLibPath = "%s/lib"     % DefaultHomebrewRoot  # -- ditto --
     elif  PymodDistDir[ModulePython] == 'dist-ana3':
+        addBinPath = "/Applications/anaconda3/bin"
         addIncPath = "/Applications/anaconda3/include"
         addLibPath = "/Applications/anaconda3/lib"
     else:
+        addBinPath = ""
         addIncPath = ""
         addLibPath = ""
+
+    if not addBinPath == "":
+        try:
+            bpath = os.environ['PATH']
+        except KeyError:
+            os.environ['PATH'] = addBinPath
+        else:
+            os.environ['PATH'] = "%s:%s" % (addBinPath, bpath)
 
     if not addIncPath == "":
         try:
@@ -937,10 +949,11 @@ def Build_pymod(parameters):
     #--------------------------------------------------------------------
     # [3] Set different command line parameters for building <pymod>
     #--------------------------------------------------------------------
-    cmd1_args = "   setup.py  build \\\n"
-    cmd2_args = "   setup.py  bdist_wheel \\\n"
-    cmd3_args = "   setup.py  bdist_egg \\\n"
-    cmd4_args = "   setup.py  clean --all \\\n"
+    cmd1_args = "   -m setup  build \\\n"
+    cmd2_args = "   -m setup  bdist_wheel \\\n"
+    deloc_cmd = "   delocate-wheel --ignore-missing-dependencies"
+    cmd3_args = "   <wheel file> \\\n"
+    cmd4_args = "   -m setup  clean --all \\\n"
 
     #--------------------------------------------------------------------
     # [4] Make the consolidated command lines
@@ -958,7 +971,7 @@ def Build_pymod(parameters):
     command2 += "   test ${PIPESTATUS[0]} -eq 0"  # tee always exits with 0
 
     command3  = "time"
-    command3 += " \\\n   %s \\\n" % parameters['python']
+    command3 += " \\\n   %s \\\n" % deloc_cmd
     command3 += cmd3_args
     command3 += "   2>&1 | tee -a %s; \\\n" % parameters['logfile']
     command3 += "   test ${PIPESTATUS[0]} -eq 0"  # tee always exits with 0
@@ -986,6 +999,7 @@ def Build_pymod(parameters):
     print( "<Stage-4>")
     print( "  ", command4 )
     print( "" )
+
     if parameters['check_cmd_only']:
         return 0
 
@@ -1011,11 +1025,26 @@ def Build_pymod(parameters):
         print( "", file=sys.stderr )
         return 1
 
-    ret = subprocess.call( command3, shell=True )
+    #---------------------------------------------------------------------------------------------------------
+    # Copy and relink library dependencies for wheel.
+    #     In this step, the "delocate-wheel" command using the desired Python must be found in the PATH.
+    #     Refer to: https://github.com/Kazzz-S/klayout/issues/49#issuecomment-1432154118
+    #               https://pypi.org/project/delocate/
+    #---------------------------------------------------------------------------------------------------------
+    cmd3_args = glob.glob( "dist/*.whl" )  # like ['dist/klayout-0.28.6-cp39-cp39-macosx_12_0_x86_64.whl']
+    if len(cmd3_args) == 1:
+        command3  = "time"
+        command3 += " \\\n   %s \\\n" % deloc_cmd
+        command3 += "  %s \\\n" % cmd3_args[0]
+        command3 += "   2>&1 | tee -a %s; \\\n" % parameters['logfile']
+        command3 += "   test ${PIPESTATUS[0]} -eq 0"  # tee always exits with 0
+        ret = subprocess.call( command3, shell=True )
+    else:
+        ret = 1
     if ret != 0:
         print( "", file=sys.stderr )
         print( "-------------------------------------------------------------", file=sys.stderr )
-        print( "!!! <%s>: failed to build <pymod-egg>" % myscript, file=sys.stderr )
+        print( "!!! <%s>: failed to <delocate-wheel>" % myscript, file=sys.stderr )
         print( "-------------------------------------------------------------", file=sys.stderr )
         print( "", file=sys.stderr )
         return 1
@@ -1212,6 +1241,7 @@ def Deploy_Binaries_For_Bundle(config, parameters):
     MacBinDir      = parameters['bin']
     MacBuildDir    = parameters['build']
     MacBuildLog    = parameters['logfile']
+    Platform       = parameters['Platform']
 
     AbsMacPkgDir   = "%s/%s" % (ProjectDir, MacPkgDir)
     AbsMacBinDir   = "%s/%s" % (ProjectDir, MacBinDir)
@@ -1657,19 +1687,56 @@ def Deploy_Binaries_For_Bundle(config, parameters):
             depdict         = WalkFrameworkPaths( pythonFrameworkPath, search_path_filter=filterreg )
             PerformChanges( depdict, replacePairs, bundleExecPathAbs )
 
-            print( "   [9.2.4] Patching openssl@1.1, gdbm, readline, sqlite, xz" )
-            usrLocalPath    = '%s/opt/' % DefaultHomebrewRoot
-            appUsrLocalPath = '@executable_path/../Frameworks/'
-            replacePairs    = [ (usrLocalPath, appUsrLocalPath, True) ]
-            replacePairs.extend( [ (openssl_version, '@executable_path/../Frameworks/openssl@1.1', True)
-                for openssl_version in glob.glob( '%s/Cellar/openssl@1.1/*' % DefaultHomebrewRoot ) ] )
-            filterreg = r'\t+%s/(opt|Cellar)' % DefaultHomebrewRoot
-            depdict   = WalkFrameworkPaths( [pythonFrameworkPath + '/../openssl@1.1',
-                                             pythonFrameworkPath + '/../gdbm',
-                                             pythonFrameworkPath + '/../readline',
-                                             pythonFrameworkPath + '/../sqlite',
-                                             pythonFrameworkPath + '/../xz'], search_path_filter=filterreg )
-
+            #---------------------------------------------------------------------------------------------------
+            # As of 2023-07-09 (KLayout 0.28.10),
+            #   python@3.9 (Python 3.9.17) in [ 'Ventura', 'Monterey', 'BigSur' ] depends on openssl@3
+            #     % brew deps python@3.9
+            #     ca-certificates
+            #     gdbm
+            #     mpdecimal
+            #     openssl@3 <===
+            #     readline
+            #     sqlite
+            #     xz
+            #
+            #   python@3.9 (Python 3.9.16; already stopped upgrading) in ['Catalina'] depends on openssl@1.1
+            #     ca-certificates
+            #     gdbm
+            #     gettext
+            #     mpdecimal
+            #     openssl@1.1 <===
+            #     readline
+            #     sqlite
+            #     xz
+            #---------------------------------------------------------------------------------------------------
+            if Platform in ['Catalina']:
+                print( "   [9.2.4] Patching openssl@1.1, gdbm, mpdecimal, readline, sqlite, xz" )
+                usrLocalPath    = '%s/opt/' % DefaultHomebrewRoot
+                appUsrLocalPath = '@executable_path/../Frameworks/'
+                replacePairs    = [ (usrLocalPath, appUsrLocalPath, True) ]
+                replacePairs.extend( [ (openssl_version, '@executable_path/../Frameworks/openssl@1.1', True)
+                    for openssl_version in glob.glob( '%s/Cellar/openssl@1.1/*' % DefaultHomebrewRoot ) ] )
+                filterreg = r'\t+%s/(opt|Cellar)' % DefaultHomebrewRoot
+                depdict   = WalkFrameworkPaths( [pythonFrameworkPath + '/../openssl@1.1',
+                                                 pythonFrameworkPath + '/../gdbm',
+                                                 pythonFrameworkPath + '/../mpdecimal',
+                                                 pythonFrameworkPath + '/../readline',
+                                                 pythonFrameworkPath + '/../sqlite',
+                                                 pythonFrameworkPath + '/../xz'], search_path_filter=filterreg )
+            else: # [ 'Ventura', 'Monterey', 'BigSur' ]
+                print( "   [9.2.4] Patching openssl@3, gdbm, mpdecimal, readline, sqlite, xz" )
+                usrLocalPath    = '%s/opt/' % DefaultHomebrewRoot
+                appUsrLocalPath = '@executable_path/../Frameworks/'
+                replacePairs    = [ (usrLocalPath, appUsrLocalPath, True) ]
+                replacePairs.extend( [ (openssl_version, '@executable_path/../Frameworks/openssl@3', True)
+                    for openssl_version in glob.glob( '%s/Cellar/openssl@3/*' % DefaultHomebrewRoot ) ] )
+                filterreg = r'\t+%s/(opt|Cellar)' % DefaultHomebrewRoot
+                depdict   = WalkFrameworkPaths( [pythonFrameworkPath + '/../openssl@3',
+                                                 pythonFrameworkPath + '/../gdbm',
+                                                 pythonFrameworkPath + '/../mpdecimal',
+                                                 pythonFrameworkPath + '/../readline',
+                                                 pythonFrameworkPath + '/../sqlite',
+                                                 pythonFrameworkPath + '/../xz'], search_path_filter=filterreg )
             PerformChanges( depdict, replacePairs, bundleExecPathAbs )
 
             print( "  [9.3] Relinking dylib dependencies for klayout" )

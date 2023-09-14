@@ -152,13 +152,13 @@ static std::pair<bool, std::set<db::Box> > compute_clip_variant (const db::Box &
 }
 
 HierarchyBuilder::HierarchyBuilder (db::Layout *target, unsigned int target_layer, const db::ICplxTrans &trans, HierarchyBuilderShapeReceiver *pipe)
-  : mp_target (target), m_initial_pass (true), m_cm_new_entry (false), m_target_layer (target_layer), m_trans (trans)
+  : mp_target (target), m_initial_pass (true), m_cm_new_entry (false), m_target_layer (target_layer), m_wants_all_cells (false), m_trans (trans)
 {
   set_shape_receiver (pipe);
 }
 
 HierarchyBuilder::HierarchyBuilder (db::Layout *target, const db::ICplxTrans &trans, HierarchyBuilderShapeReceiver *pipe)
-  : mp_target (target), m_initial_pass (true), m_cm_new_entry (false), m_target_layer (0), m_trans (trans)
+  : mp_target (target), m_initial_pass (true), m_cm_new_entry (false), m_target_layer (0), m_wants_all_cells (false), m_trans (trans)
 {
   set_shape_receiver (pipe);
 }
@@ -191,7 +191,7 @@ HierarchyBuilder::reset ()
 void
 HierarchyBuilder::register_variant (db::cell_index_type non_var, db::cell_index_type var)
 {
-  //  non_var (despite it's name) may be a variant created previously.
+  //  non_var (despite its name) may be a variant created previously.
   variant_to_original_target_map_type::const_iterator v = m_variants_to_original_target_map.find (non_var);
   if (v != m_variants_to_original_target_map.end ()) {
     non_var = v->second;

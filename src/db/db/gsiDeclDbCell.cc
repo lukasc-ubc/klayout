@@ -20,9 +20,8 @@
 
 */
 
-
-
 #include "gsiDecl.h"
+#include "gsiDeclDbMetaInfo.h"
 
 #include "gsiDeclDbHelpers.h"
 #include "dbLayout.h"
@@ -984,6 +983,58 @@ static db::Layout *layout (db::Cell *cell)
   return cell->layout ();
 }
 
+static void cell_clear_meta_info (db::Cell *cell)
+{
+  if (cell->layout ()) {
+    cell->layout ()->clear_meta (cell->cell_index ());
+  }
+}
+
+static void cell_remove_meta_info (db::Cell *cell, const std::string &name)
+{
+  if (cell->layout ()) {
+    cell->layout ()->remove_meta_info (cell->cell_index (), name);
+  }
+}
+
+static void cell_add_meta_info (db::Cell *cell, const MetaInfo &mi)
+{
+  if (cell->layout ()) {
+    cell->layout ()->add_meta_info (cell->cell_index (), mi.name, db::MetaInfo (mi.description, mi.value, mi.persisted));
+  }
+}
+
+static const tl::Variant &cell_meta_info_value (db::Cell *cell, const std::string &name)
+{
+  if (! cell->layout ()) {
+    static tl::Variant null_value;
+    return null_value;
+  } else {
+    return cell->layout ()->meta_info (cell->cell_index (), name).value;
+  }
+}
+
+static MetaInfo *cell_meta_info (db::Cell *cell, const std::string &name)
+{
+  if (! cell->layout ()) {
+    return 0;
+  } else if (cell->layout ()->has_meta_info (cell->cell_index (), name)) {
+    const db::MetaInfo &value = cell->layout ()->meta_info (cell->cell_index (), name);
+    return new MetaInfo (name, value);
+  } else {
+    return 0;
+  }
+}
+
+static gsi::MetaInfoIterator cell_each_meta_info (const db::Cell *cell)
+{
+  if (! cell->layout ()) {
+    return gsi::MetaInfoIterator ();
+  } else {
+    return gsi::MetaInfoIterator (cell->layout (), cell->layout ()->begin_meta (cell->cell_index ()), cell->layout ()->end_meta (cell->cell_index ()));
+  }
+}
+
 static bool cell_has_prop_id (const db::Cell *c)
 {
   return c->prop_id () != 0;
@@ -1780,17 +1831,58 @@ Class<db::Cell> decl_Cell ("db", "Cell",
     "\n"
     "This method has been introduced in version 0.23."
   ) + 
+  gsi::method_ext ("add_meta_info", &cell_add_meta_info, gsi::arg ("info"),
+    "@brief Adds meta information to the cell\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::method_ext ("clear_meta_info", &cell_clear_meta_info,
+    "@brief Clears the meta information of the cell\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::method_ext ("remove_meta_info", &cell_remove_meta_info, gsi::arg ("name"),
+    "@brief Removes meta information from the cell\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::method_ext ("meta_info_value", &cell_meta_info_value, gsi::arg ("name"),
+    "@brief Gets the meta information value for a given name\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "If no meta information with the given name exists, a nil value will be returned.\n"
+    "A more generic version that delivers all fields of the meta information is \\meta_info.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::factory_ext ("meta_info", &cell_meta_info, gsi::arg ("name"),
+    "@brief Gets the meta information for a given name\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "If no meta information with the given name exists, a default object with empty fields will be returned.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
+  gsi::iterator_ext ("each_meta_info", &cell_each_meta_info,
+    "@brief Iterates over the meta information of the cell\n"
+    "See \\LayoutMetaInfo for details about cells and meta information.\n"
+    "\n"
+    "This method has been introduced in version 0.28.8."
+  ) +
   gsi::method_ext ("write", &write_simple, gsi::arg ("file_name"),
     "@brief Writes the cell to a layout file\n"
     "The format of the file will be determined from the file name. Only the cell and "
-    "it's subtree below will be saved.\n"
+    "its subtree below will be saved.\n"
     "\n"
     "This method has been introduced in version 0.23.\n"
   ) +
   gsi::method_ext ("write", &write_options, gsi::arg ("file_name"), gsi::arg ("options"),
     "@brief Writes the cell to a layout file\n"
     "The format of the file will be determined from the file name. Only the cell and "
-    "it's subtree below will be saved.\n"
+    "its subtree below will be saved.\n"
     "In contrast to the other 'write' method, this version allows one to specify save options, i.e. "
     "scaling etc.\n"
     "\n"
@@ -2484,7 +2576,7 @@ Class<db::Cell> decl_Cell ("db", "Cell",
     "\n"
     "In contrast to the \\transform method, this method allows propagation of the transformation into child cells. "
     "More precisely: it applies just a part of the given transformation to the instance, such that when transforming "
-    "the cell instantiated and it's shapes with the same transformation, the result will reflect the desired transformation. Mathematically spoken, the "
+    "the cell instantiated and its shapes with the same transformation, the result will reflect the desired transformation. Mathematically spoken, the "
     "transformation of the instance (A) is transformed with the given transformation T using \"A' = T * A * Tinv\" where "
     "Tinv is the inverse of T. In effect, the transformation T commutes with the new instance transformation A' and can be "
     "applied to child cells as well. This method is therefore useful to transform a hierarchy of cells.\n"
@@ -3129,7 +3221,7 @@ Class<db::Cell> decl_Cell ("db", "Cell",
     "\n"
     "The parameters are given in the order the parameters are declared. Use \\pcell_declaration "
     "on the instance to get the PCell declaration object of the cell. That PCellDeclaration object "
-    "delivers the parameter declaration with it's 'get_parameters' method.\n"
+    "delivers the parameter declaration with its 'get_parameters' method.\n"
     "Each parameter in the variant list passed to the second list of values corresponds to "
     "one parameter declaration.\n"
     "\n"
@@ -3921,7 +4013,7 @@ Class<db::Instance> decl_Instance ("db", "Instance",
     "@param layer_index The index of the layer the bounding box will be computed for.\n"
     "The bounding box incorporates all instances that the array represents. "
     "It gives the overall extension of the child cell as seen in the calling cell (or all array members if the instance forms an array) "
-    "for the given layer. If the layer is empty in this cell and all it's children', an empty bounding box will be returned. "
+    "for the given layer. If the layer is empty in this cell and all its children', an empty bounding box will be returned. "
     "\n"
     "This method has been introduced in version 0.25. 'bbox' is the preferred synonym for it since version 0.28."
   ) +

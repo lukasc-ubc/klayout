@@ -44,6 +44,7 @@ namespace rdb
 {
 
 extern std::string cfg_rdb_show_all;
+extern std::string cfg_rdb_list_shapes;
 
 struct FlagDescriptor 
 {
@@ -1447,6 +1448,7 @@ MarkerBrowserPage::MarkerBrowserPage (QWidget * /*parent*/)
     m_update_needed (false),
     mp_database (0), 
     m_show_all (true),
+    m_list_shapes (true),
     mp_view (0), 
     m_cv_index (0),
     m_num_items (0), 
@@ -1504,6 +1506,8 @@ MarkerBrowserPage::MarkerBrowserPage (QWidget * /*parent*/)
   markers_list->header ()->setSortIndicatorShown (true);
   markers_list->header ()->setMinimumSectionSize (24);
 
+  list_shapes_cb->setChecked (m_list_shapes);
+
   connect (markers_list, SIGNAL (doubleClicked (const QModelIndex &)), this, SLOT (marker_double_clicked (const QModelIndex &)));
 
   connect (dir_up_pb, SIGNAL (clicked ()), this, SLOT (dir_up_clicked ()));
@@ -1519,6 +1523,7 @@ MarkerBrowserPage::MarkerBrowserPage (QWidget * /*parent*/)
   connect (cat_filter, SIGNAL (textEdited (const QString &)), this, SLOT (filter_changed ()));
   connect (cell_filter, SIGNAL (textEdited (const QString &)), this, SLOT (filter_changed ()));
   connect (rerun_button, SIGNAL (pressed ()), this, SLOT (rerun_button_pressed ()));
+  connect (list_shapes_cb, SIGNAL (clicked ()), this, SLOT (list_shapes_clicked ()));
 
   m_show_all_action = new QAction (QObject::tr ("Show All"), this);
   m_show_all_action->setCheckable (true);
@@ -1674,7 +1679,20 @@ MarkerBrowserPage::show_all (bool f)
   }
 }
 
-void 
+void
+MarkerBrowserPage::list_shapes (bool f)
+{
+  if (f != m_list_shapes) {
+
+    m_list_shapes = f;
+    list_shapes_cb->setChecked (f);
+
+    update_info_text ();
+
+  }
+}
+
+void
 MarkerBrowserPage::set_rdb (rdb::Database *database)
 {
   if (database != mp_database) {
@@ -1820,7 +1838,7 @@ MarkerBrowserPage::marker_double_clicked (const QModelIndex &)
 }
 
 void 
-MarkerBrowserPage::set_window (rdb::window_type window, double window_dim, rdb::context_mode_type context)
+MarkerBrowserPage::set_window (rdb::window_type window, const lay::Margin &window_dim, rdb::context_mode_type context)
 {
   if (window != m_window || window_dim != m_window_dim || context != m_context) {
     m_window = window;
@@ -1975,7 +1993,7 @@ MarkerBrowserPage::update_info_text ()
 
       for (rdb::Values::const_iterator v = item->values ().begin (); v != item->values ().end (); ++v) {
 
-        if (v->get () != 0) {
+        if (v->get () != 0 && (m_list_shapes || ! v->get ()->is_shape ())) {
 
           if (v->tag_id () != 0) {
             const rdb::Tag &tag = mp_database->tags ().tag (v->tag_id ());
@@ -2262,15 +2280,17 @@ MarkerBrowserPage::do_update_markers ()
 
     if (mp_view && ! m_markers_bbox.empty ()) {
 
+      double wdim = m_window_dim.get (m_markers_bbox);
+
       if (m_window == FitCell) {
         mp_view->zoom_fit ();
       } else if (m_window == FitMarker) {
-        mp_view->zoom_box (m_markers_bbox.enlarged (db::DVector (m_window_dim, m_window_dim)));
+        mp_view->zoom_box (m_markers_bbox.enlarged (db::DVector (wdim, wdim)));
       } else if (m_window == Center) {
         mp_view->pan_center (m_markers_bbox.p1 () + (m_markers_bbox.p2 () - m_markers_bbox.p1 ()) * 0.5);
       } else if (m_window == CenterSize) {
-        double w = std::max (m_markers_bbox.width (), m_window_dim);
-        double h = std::max (m_markers_bbox.height (), m_window_dim);
+        double w = std::max (m_markers_bbox.width (), wdim);
+        double h = std::max (m_markers_bbox.height (), wdim);
         db::DPoint center (m_markers_bbox.p1 () + (m_markers_bbox.p2 () - m_markers_bbox.p1 ()) * 0.5);
         db::DVector d (w * 0.5, h * 0.5);
         mp_view->zoom_box (db::DBox (center - d, center + d));
@@ -2851,7 +2871,15 @@ MarkerBrowserPage::show_all_clicked ()
   }
 }
 
-void  
+void
+MarkerBrowserPage::list_shapes_clicked ()
+{
+  if (mp_plugin_root) {
+    mp_plugin_root->config_set (cfg_rdb_list_shapes, tl::to_string (list_shapes_cb->isChecked ()));
+  }
+}
+
+void
 MarkerBrowserPage::unwaive_all ()
 {
   if (! mp_database) {

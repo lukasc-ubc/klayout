@@ -54,6 +54,11 @@
 #include "tlDeferredExecution.h"
 #include "dbInstElement.h"
 
+#if defined(HAVE_QT)
+# include <QImage>
+class QWidget;
+#endif
+
 namespace rdb {
   class Database;
 }
@@ -187,11 +192,6 @@ public:
    */
   LayoutViewBase (db::Manager *mgr, bool editable, lay::Plugin *plugin_parent, unsigned int options = (unsigned int) LV_Normal);
 
-  /**
-   *  @brief Constructor
-   */
-  LayoutViewBase (lay::LayoutView *ui, db::Manager *mgr, bool editable, lay::Plugin *plugin_parent, unsigned int options = (unsigned int) LV_Normal);
-
   /** 
    *  @brief Destructor
    */
@@ -254,7 +254,7 @@ public:
   /**
    *  @brief Pastes from clipboard and initiates a move
    */
-  void paste_interactive ();
+  void paste_interactive (bool transient_mode = false);
 
   /**
    *  @brief Copies to clipboard
@@ -263,6 +263,13 @@ public:
    *  looks for copy providers in the tree views for example.
    */
   virtual void copy ();
+
+  /**
+   *  @brief Copies to clipboard (view objects only)
+   *
+   *  This version does not look for copy sources in the tree views.
+   */
+  void copy_view_objects ();
 
   /**
    *  @brief Cuts to clipboard
@@ -980,6 +987,16 @@ public:
    */
   tl::BitmapBuffer get_pixels_with_options_mono (unsigned int width, unsigned int height, int linewidth, tl::Color background, tl::Color foreground, tl::Color active_color, const db::DBox &target_box);
 
+#if defined(HAVE_QT)
+  /**
+   *  @brief Gets the widget object that view is embedded in
+   */
+  virtual QWidget *widget ()
+  {
+    return 0;
+  }
+#endif
+
   /**
    *  @brief Hierarchy level selection setter
    */
@@ -1176,6 +1193,22 @@ public:
   double default_text_size () const
   {
     return m_default_text_size;
+  }
+
+  /**
+   *  @brief Sets text point mode
+   *
+   *  In point mode, the text is treated like a point.
+   *  Selection happens at the texts' origin.
+   */
+  void text_point_mode (bool pm);
+
+  /**
+   *  @brief Gets text point mode
+   */
+  bool text_point_mode () const
+  {
+    return m_text_point_mode;
   }
 
   /**
@@ -1702,6 +1735,14 @@ public:
    *  @brief Gets the canvas object (where the layout is drawn and view objects are placed)
    */
   lay::LayoutCanvas *canvas ()
+  {
+    return mp_canvas;
+  }
+
+  /**
+   *  @brief Gets the canvas object (const version)
+   */
+  const lay::LayoutCanvas *canvas () const
   {
     return mp_canvas;
   }
@@ -2786,6 +2827,7 @@ private:
   tl::Color m_text_color;
   bool m_apply_text_trans;
   double m_default_text_size;
+  bool m_text_point_mode;
   unsigned int m_text_font;
   bool m_show_markers;
   bool m_no_stipples;
@@ -2846,8 +2888,6 @@ private:
 
   tl::Clock m_clock, m_last_checked;
 
-  void init (db::Manager *mgr);
-
   void do_prop_changed ();
   void do_redraw (int layer);
   void do_redraw ();
@@ -2866,6 +2906,8 @@ private:
   bool has_max_hier () const;
   int max_hier_level () const;
 
+  void zoom_by (double f);
+
   void update_event_handlers ();
   void viewport_changed ();
   void cellview_changed (unsigned int index);
@@ -2875,7 +2917,16 @@ private:
   void init_layer_properties (LayerProperties &props, const LayerPropertiesList &lp_list) const;
   void merge_dither_pattern (lay::LayerPropertiesList &props);
 
+  void refresh ();
+
 protected:
+  /**
+   *  @brief Constructor for calling from a LayoutView
+   */
+  LayoutViewBase (lay::LayoutView *ui, db::Manager *mgr, bool editable, lay::Plugin *plugin_parent, unsigned int options = (unsigned int) LV_Normal);
+
+  void init (db::Manager *mgr);
+
   lay::Plugin *active_plugin () const
   {
     return mp_active_plugin;

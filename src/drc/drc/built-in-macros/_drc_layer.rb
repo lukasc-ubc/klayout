@@ -630,7 +630,7 @@ CODE
     # @synopsis layer.with_area_ratio(min .. max)
     # @synopsis layer.with_area_ratio(value)
     # @synopsis layer.with_area_ratio(min, max)
-    # The area ratio is a measure how far a polygon is approximated by it's
+    # The area ratio is a measure how far a polygon is approximated by its
     # bounding box. The value is always larger or equal to 1. Boxes have a 
     # area ratio of 1. Larger values mean more empty area inside the bounding box.
     # 
@@ -648,7 +648,7 @@ CODE
     
     # %DRC%
     # @name with_relative_height
-    # @brief Selects polygons by the ratio of the height vs. width of it's bounding box
+    # @brief Selects polygons by the ratio of the height vs. width of its bounding box
     # @synopsis layer.with_relative_height(min .. max)
     # @synopsis layer.with_relative_height(value)
     # @synopsis layer.with_relative_height(min, max)
@@ -2630,7 +2630,7 @@ CODE
     # @brief Returns the intersection points of intersecting edge segments for two edge collections
     # @synopsis layer.intersections(edges)
     # This operation is similar to the "&" operator, but it does also report intersection points
-    # between non-colinear, but intersection edges. Such points are reported as point-like,
+    # between non-colinear, but intersecting edges. Such points are reported as point-like,
     # degenerated edge objects.
     #
     # This method is available for edge layers. The argument must be an edge layer.
@@ -5007,6 +5007,26 @@ CODE
     #
     # See \global#report and \global#target on how to configure output to a target layout
     # or report database. 
+    # 
+    # See also \global#new_target and \global#new_report on how to create additional 
+    # targets for output. This allows saving certain layers to different files than
+    # the standard target or report. To do so, create a new target or report using one
+    # of these functions and pass that object to the corresponding "output" call as
+    # an additional argument.
+    #
+    # Example:
+    #
+    # @code
+    # check1 = ...
+    # check2 = ...
+    # check3 = ...
+    #
+    # second_report = new_report("Only for check2", "check2.lyrdb")
+    #
+    # check1.output("Check 1")
+    # check2.output("Check 2", second_report)
+    # check3.output("Check 3")
+    # @/code
     
     def output(*args)
       @engine._context("output") do
@@ -5147,9 +5167,6 @@ CODE
     def _fill(with_left, *args)
 
       m = with_left ? "fill_with_left" : "fill"
-
-      # generation of new cells not tested in deep mode
-      @deep && raise("#{m} command not supported in deep mode currently")
 
       (@engine._output_layout && @engine._output_cell) || raise("#{m} command needs an output layout and output cell")
 

@@ -111,7 +111,7 @@ RubyStackTraceProvider::scope_index (const std::vector<tl::BacktraceElement> &bt
 
     //  disable scoped debugging (e.g. DRC script lines) if $KLAYOUT_RBA_DEBUG_SCOPE is set.
     if (consider_scope < 0) {
-      consider_scope = tl::has_env ("KLAYOUT_RBA_DEBUG_SCOPE") ? 0 : 1;
+      consider_scope = tl::app_flag ("rba-debug-scope") ? 0 : 1;
     }
     if (! consider_scope) {
       return 0;
@@ -1654,7 +1654,7 @@ public:
     for (auto cc = cls->begin_child_classes (); cc != cls->end_child_classes (); ++cc) {
       if (! cc->name ().empty ()) {
         if (! is_registered (cc->declaration (), false)) {
-          make_class (cc->declaration (), false, klass, cc->declaration ());
+          make_class (cc->declaration (), false, klass, cls);
         } else {
           VALUE child_class = ruby_cls (cc->declaration (), false);
           rb_define_const (klass, cc->name ().c_str (), child_class);
@@ -2486,9 +2486,11 @@ RubyInterpreter::begin_exec ()
 {
   d->exit_on_next = false;
   d->block_exceptions = false;
-  d->file_id_map.clear ();
-  if (d->current_exec_level++ == 0 && d->current_exec_handler) {
-    d->current_exec_handler->start_exec (this);
+  if (d->current_exec_level++ == 0) {
+    d->file_id_map.clear ();
+    if (d->current_exec_handler) {
+      d->current_exec_handler->start_exec (this);
+    }
   }
 }
 

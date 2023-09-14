@@ -260,8 +260,6 @@ LayoutViewBase::LayoutViewBase (lay::LayoutView *ui, db::Manager *manager, bool 
 {
   //  either it's us or the parent has a dispatcher
   tl_assert (dispatcher () != 0);
-
-  init (manager);
 }
 
 void
@@ -347,6 +345,7 @@ LayoutViewBase::init (db::Manager *mgr)
   m_show_properties = false;
   m_apply_text_trans = true;
   m_default_text_size = 0.1;
+  m_text_point_mode = false;
   m_text_font = 0;
   m_show_markers = true;
   m_no_stipples = false;
@@ -984,6 +983,13 @@ LayoutViewBase::configure (const std::string &name, const std::string &value)
     double sz;
     tl::from_string (value, sz);
     default_text_size (sz);
+    return true;
+
+  } else if (name == cfg_text_point_mode) {
+
+    bool flag;
+    tl::from_string (value, flag);
+    text_point_mode (flag);
     return true;
 
   } else if (name == cfg_text_font) {
@@ -2771,8 +2777,7 @@ LayoutViewBase::get_screenshot ()
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Save screenshot")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
   
   return mp_canvas->screenshot ().to_image_copy ();
 }
@@ -2783,8 +2788,7 @@ LayoutViewBase::get_screenshot_pb ()
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Save screenshot")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   return mp_canvas->screenshot ();
 }
@@ -2822,9 +2826,8 @@ LayoutViewBase::save_screenshot (const std::string &fn)
     writer.setText (tl::to_qstring (i->first), tl::to_qstring (i->second));
   }
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
-  
+  refresh ();
+
   if (! writer.write (mp_canvas->screenshot ().to_image ())) {
     throw tl::Exception (tl::to_string (tr ("Unable to write screenshot to file: %s (%s)")), fn, tl::to_string (writer.errorString ()));
   }
@@ -2837,8 +2840,7 @@ LayoutViewBase::save_screenshot (const std::string &fn)
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Save screenshot")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   tl::OutputStream stream (fn);
   tl::PixelBuffer img = mp_canvas->screenshot ();
@@ -2861,9 +2863,8 @@ LayoutViewBase::get_image (unsigned int width, unsigned int height)
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Get image")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
-  
+  refresh ();
+
   return mp_canvas->image (width, height).to_image_copy ();
 }
 #endif
@@ -2873,8 +2874,7 @@ LayoutViewBase::get_pixels (unsigned int width, unsigned int height)
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Get image")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   return mp_canvas->image (width, height);
 }
@@ -2886,9 +2886,8 @@ LayoutViewBase::get_image_with_options (unsigned int width, unsigned int height,
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Get image")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
-  
+  refresh ();
+
   if (monochrome) {
     return mp_canvas->image_with_options_mono (width, height, linewidth, background, foreground, active, target_box).to_image_copy ();
   } else {
@@ -2903,8 +2902,7 @@ LayoutViewBase::get_pixels_with_options (unsigned int width, unsigned int height
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Get image")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   return mp_canvas->image_with_options (width, height, linewidth, oversampling, resolution, background, foreground, active, target_box);
 }
@@ -2915,8 +2913,7 @@ LayoutViewBase::get_pixels_with_options_mono (unsigned int width, unsigned int h
 {
   tl::SelfTimer timer (tl::verbosity () >= 11, tl::to_string (tr ("Get image")));
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   return mp_canvas->image_with_options_mono (width, height, linewidth, background, foreground, active, target_box);
 }
@@ -2935,9 +2932,8 @@ LayoutViewBase::save_image (const std::string &fn, unsigned int width, unsigned 
     writer.setText (tl::to_qstring (i->first), tl::to_qstring (i->second));
   }
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
-  
+  refresh ();
+
   if (! writer.write (mp_canvas->image (width, height).to_image ())) {
     throw tl::Exception (tl::to_string (tr ("Unable to write screenshot to file: %s (%s)")), fn, tl::to_string (writer.errorString ()));
   }
@@ -2952,8 +2948,7 @@ LayoutViewBase::save_image (const std::string &fn, unsigned int width, unsigned 
 
   lay::Viewport vp (width, height, mp_canvas->viewport ().target_box ());
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   tl::OutputStream stream (fn);
   tl::PixelBuffer img = mp_canvas->image (width, height);
@@ -2987,8 +2982,7 @@ LayoutViewBase::save_image_with_options (const std::string &fn,
     writer.setText (tl::to_qstring (i->first), tl::to_qstring (i->second));
   }
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   if (monochrome) {
     if (! writer.write (mp_canvas->image_with_options_mono (width, height, linewidth, background, foreground, active, target_box).to_image ())) {
@@ -3013,8 +3007,7 @@ LayoutViewBase::save_image_with_options (const std::string &fn,
   lay::Viewport vp (width, height, mp_canvas->viewport ().target_box ());
   std::vector<std::pair<std::string, std::string> > texts = png_texts (this, vp.box ());
 
-  //  Execute all deferred methods - ensure there are no pending tasks
-  tl::DeferredMethodScheduler::execute ();
+  refresh ();
 
   tl::OutputStream stream (fn);
   if (monochrome) {
@@ -3097,7 +3090,7 @@ LayoutViewBase::reload_layout (unsigned int cv_index)
   //  when reading the file, it must have the layers created as well
   lay::CellView cv_empty;
 
-  handle = new lay::LayoutHandle (new db::Layout (manager ()), filename);
+  handle = new lay::LayoutHandle (new db::Layout (is_editable (), manager ()), filename);
   handle->set_tech_name (technology);
   cv_empty.set (handle);
 
@@ -3110,7 +3103,7 @@ LayoutViewBase::reload_layout (unsigned int cv_index)
 
   //  create a new handle
   lay::CellView cv;
-  handle = new lay::LayoutHandle (new db::Layout (manager ()), filename);
+  handle = new lay::LayoutHandle (new db::Layout (is_editable (), manager ()), filename);
   cv.set (handle);
 
   try {
@@ -3202,6 +3195,25 @@ LayoutViewBase::reload_layout (unsigned int cv_index)
   goto_view (state);
 }
 
+static void
+get_lyp_from_meta_info (const db::Layout &layout, std::string &lyp_file, bool &add_other_layers)
+{
+  db::Layout::meta_info_name_id_type layer_properties_file_name_id = layout.meta_info_name_id ("layer-properties-file");
+  db::Layout::meta_info_name_id_type layer_properties_add_other_layers_name_id = layout.meta_info_name_id ("layer-properties-add-other-layers");
+
+  for (db::Layout::meta_info_iterator meta = layout.begin_meta (); meta != layout.end_meta (); ++meta) {
+    if (meta->first == layer_properties_file_name_id) {
+      lyp_file = meta->second.value.to_string ();
+    }
+    if (meta->first == layer_properties_add_other_layers_name_id) {
+      try {
+        add_other_layers = meta->second.value.to_bool ();
+      } catch (...) {
+      }
+    }
+  }
+}
+
 unsigned int 
 LayoutViewBase::add_layout (lay::LayoutHandle *layout_handle, bool add_cellview, bool initialize_layers)
 {
@@ -3266,17 +3278,7 @@ LayoutViewBase::add_layout (lay::LayoutHandle *layout_handle, bool add_cellview,
       }
 
       //  Give the layout object a chance to specify a certain layer property file
-      for (db::Layout::meta_info_iterator meta = cv->layout ().begin_meta (); meta != cv->layout ().end_meta (); ++meta) {
-        if (meta->name == "layer-properties-file") {
-          lyp_file = meta->value;
-        }
-        if (meta->name == "layer-properties-add-other-layers") {
-          try {
-            tl::from_string (meta->value, add_other_layers);
-          } catch (...) {
-          }
-        }
-      }
+      get_lyp_from_meta_info (cv->layout (), lyp_file, add_other_layers);
 
       //  interpolate the layout properties file name
       tl::Eval expr;
@@ -3330,7 +3332,7 @@ LayoutViewBase::create_layout (const std::string &technology, bool add_cellview,
 {
   const db::Technology *tech = db::Technologies::instance ()->technology_by_name (technology);
 
-  db::Layout *layout = new db::Layout (m_editable, manager ());
+  db::Layout *layout = new db::Layout (is_editable (), manager ());
   if (tech) {
     layout->dbu (tech->dbu ());
   }
@@ -3357,7 +3359,7 @@ LayoutViewBase::load_layout (const std::string &filename, const db::LoadLayoutOp
 
   //  create a new layout handle 
   lay::CellView cv;
-  lay::LayoutHandle *handle = new lay::LayoutHandle (new db::Layout (manager ()), filename);
+  lay::LayoutHandle *handle = new lay::LayoutHandle (new db::Layout (is_editable (), manager ()), filename);
   cv.set (handle);
 
   unsigned int cv_index;
@@ -3438,17 +3440,7 @@ LayoutViewBase::load_layout (const std::string &filename, const db::LoadLayoutOp
     }
 
     //  Give the layout object a chance to specify a certain layer property file
-    for (db::Layout::meta_info_iterator meta = cv->layout().begin_meta (); meta != cv->layout().end_meta (); ++meta) {
-      if (meta->name == "layer-properties-file") {
-        lyp_file = meta->value;
-      }
-      if (meta->name == "layer-properties-add-other-layers") {
-        try {
-          tl::from_string (meta->value, add_other_layers);
-        } catch (...) {
-        }
-      }
-    }
+    get_lyp_from_meta_info (cv->layout (), lyp_file, add_other_layers);
 
     //  interpolate the layout properties file name
     tl::Eval expr;
@@ -3694,6 +3686,16 @@ LayoutViewBase::timer ()
 }
 
 void
+LayoutViewBase::refresh ()
+{
+  //  Execute all deferred methods - ensure there are no pending tasks
+  tl::DeferredMethodScheduler::execute ();
+
+  //  Issue a "tick" to execute all other pending tasks
+  timer ();
+}
+
+void
 LayoutViewBase::force_update_content ()
 {
   set_view_ops ();
@@ -3853,13 +3855,26 @@ LayoutViewBase::pan_center (const db::DPoint &p)
 void
 LayoutViewBase::zoom_in ()
 {
-  shift_window (zoom_factor, 0.0, 0.0);
+  zoom_by (zoom_factor);
 }
 
 void
 LayoutViewBase::zoom_out ()
 {
-  shift_window (1.0 / zoom_factor, 0.0, 0.0);
+  zoom_by (1.0 / zoom_factor);
+}
+
+void
+LayoutViewBase::zoom_by (double f)
+{
+  db::DBox b = mp_canvas->viewport ().box ();
+
+  db::DPoint c = b.center ();
+  if (mp_canvas->mouse_in_window ()) {
+    c = mp_canvas->mouse_position_um ();
+  }
+
+  zoom_box ((b.moved (db::DPoint () - c) * f).moved (c - db::DPoint ()));
 }
 
 void
@@ -5164,7 +5179,16 @@ LayoutViewBase::default_text_size (double fs)
   }
 }
 
-void 
+void
+LayoutViewBase::text_point_mode (bool pm)
+{
+  if (m_text_point_mode != pm) {
+    m_text_point_mode = pm;
+    redraw ();
+  }
+}
+
+void
 LayoutViewBase::clear_ruler_new_cell (bool f)
 {
   m_clear_ruler_new_cell = f;
@@ -5281,29 +5305,31 @@ LayoutViewBase::paste ()
 }
 
 void
-LayoutViewBase::paste_interactive ()
+LayoutViewBase::paste_interactive (bool transient_mode)
 {
   clear_selection ();
 
   std::unique_ptr<db::Transaction> trans (new db::Transaction (manager (), tl::to_string (tr ("Paste and move"))));
 
-  {
-    //  let the receivers sort out who is pasting what ..
-    do_paste ();
-    lay::Editables::paste ();
-  }
+  lay::Editables::paste ();
 
   //  temporarily close the transaction and pass to the move service for appending it's own
   //  operations.
   trans->close ();
 
-  if (mp_move_service->begin_move (trans.release (), false)) {
+  if (mp_move_service->begin_move (trans.release (), transient_mode)) {
     switch_mode (-1);  //  move mode
   }
 }
 
 void
 LayoutViewBase::copy ()
+{
+  copy_view_objects ();
+}
+
+void
+LayoutViewBase::copy_view_objects ()
 {
   cancel_edits ();
   if (! lay::Editables::has_selection ()) {
